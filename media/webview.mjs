@@ -7,6 +7,7 @@ import {
 import { safeFileName } from './file-utils.mjs';
 import {
   getCellInteraction,
+  getObjectItemInteraction,
   getPagerState,
   getRowActions,
   shouldKeepKeyboardShortcutInField,
@@ -18,6 +19,7 @@ import {
   rowValuesEqual,
 } from './row-detail-ui.mjs';
 import { getDirtyStatusText, getSaveButtonState } from './save-state.mjs';
+import { getGridColumnCount, getGridEmptyStateKind } from './grid-empty-state.mjs';
 import {
   getSchemaObjects,
   queryAll,
@@ -460,6 +462,7 @@ async function refreshRows() {
 }
 
 function renderSidebar() {
+  const previousScrollTop = elements.sidebar.scrollTop;
   clear(elements.sidebar);
   const search = createElement('input', {
     className: 'object-search',
@@ -476,6 +479,7 @@ function renderSidebar() {
   appendObjectSection('Views', tables.filter((table) => table.type === 'view'));
   appendObjectSection('Indexes', schemaObjects.filter((object) => object.type === 'index'));
   appendObjectSection('Triggers', schemaObjects.filter((object) => object.type === 'trigger'));
+  elements.sidebar.scrollTop = previousScrollTop;
 }
 
 function appendObjectSection(label, objects) {
@@ -486,16 +490,21 @@ function appendObjectSection(label, objects) {
 
   elements.sidebar.append(createElement('div', { className: 'sidebar-heading', text: label }));
   for (const object of visibleObjects) {
-    const isTableLike = object.type === 'table' || object.type === 'view';
+    const interaction = getObjectItemInteraction({
+      objectType: object.type,
+      objectName: object.name,
+      tableName: object.tableName,
+    });
     const className = [
       object.name === activeTableName ? 'object-item active' : 'object-item',
-      isTableLike ? '' : 'secondary',
+      interaction.browsable ? '' : 'secondary',
     ].filter(Boolean).join(' ');
-    const attributes = isTableLike ? { type: 'button', 'data-table': object.name } : {};
-    const tagName = isTableLike ? 'button' : 'div';
-    const meta = isTableLike ? `${object.rowCount} rows` : object.tableName;
+    const attributes = interaction.browsable ? { type: 'button', 'data-table': object.name } : {};
+    const tagName = interaction.browsable ? 'button' : 'div';
+    const meta = interaction.browsable ? `${object.rowCount} rows` : object.tableName;
     elements.sidebar.append(createElement(tagName, {
       className,
+      title: interaction.title,
       attributes,
       children: [
         createElement('span', { className: 'object-name', text: object.name }),
@@ -629,7 +638,21 @@ function renderGrid() {
   thead.append(headerRow, filterRow);
   tableElement.append(thead);
 
+  const columnCount = getGridColumnCount({ columnCount: table.columns.length, tableType: table.type });
   const tbody = createElement('tbody');
+
+  if (visibleRows.length === 0) {
+    tbody.append(createElement('tr', {
+      children: [
+        createElement('td', {
+          className: 'grid-empty-cell',
+          attributes: { colspan: String(columnCount) },
+          children: [buildGridEmptyState(table)],
+        }),
+      ],
+    }));
+  }
+
   for (const [rowIndex, row] of visibleRows.entries()) {
     const tr = createElement('tr', {
       className: selectedRow === rowIndex ? 'selected-row' : '',
@@ -689,6 +712,66 @@ function renderGrid() {
 
   tableElement.append(tbody);
   elements.grid.replaceChildren(tableElement);
+}
+
+function buildGridEmptyState(table) {
+  const kind = getGridEmptyStateKind({
+    tableType: table.type,
+    columnCount: table.columns.length,
+    rowCount: visibleRows.length,
+  });
+
+  if (kind === 'view-no-columns') {
+    return createElement('div', { className: 'empty-state', text: 'This view has no columns.' });
+  }
+
+  if (kind === 'view-no-rows') {
+    return createElement('div', { className: 'empty-state', text: 'No rows to show.' });
+  }
+
+  if (kind === 'table-no-columns') {
+    return createElement('div', {
+      className: 'empty-state grid-empty-state',
+      children: [
+        createElement('div', { className: 'empty-state-title', text: 'This table has no columns yet.' }),
+        createElement('div', {
+          className: 'empty-state-description',
+          text: 'Add a column to start entering data.',
+        }),
+        createElement('button', {
+          className: 'toolbar-button primary',
+          text: 'Add column',
+          attributes: { type: 'button', 'data-action': 'add-column' },
+        }),
+      ],
+    });
+  }
+
+  return createElement('div', {
+    className: 'empty-state grid-empty-state',
+    children: [
+      createElement('div', { className: 'empty-state-title', text: 'No rows yet.' }),
+      createElement('div', {
+        className: 'empty-state-description',
+        text: 'Insert a row or add another column to this table.',
+      }),
+      createElement('div', {
+        className: 'empty-state-actions',
+        children: [
+          createElement('button', {
+            className: 'toolbar-button primary',
+            text: 'New row',
+            attributes: { type: 'button', 'data-action': 'add-row' },
+          }),
+          createElement('button', {
+            className: 'toolbar-button',
+            text: 'Add column',
+            attributes: { type: 'button', 'data-action': 'add-column' },
+          }),
+        ],
+      }),
+    ],
+  });
 }
 
 function getColumnBadges(column) {

@@ -113,6 +113,68 @@ for (let index = 1; index <= 350; index += 1) {
   );
 }
 
+db.run(`
+  CREATE TABLE wide_dashboard (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    metric_a REAL DEFAULT 0,
+    metric_b REAL DEFAULT 0,
+    metric_c REAL DEFAULT 0,
+    metric_d REAL DEFAULT 0,
+    metric_e REAL DEFAULT 0,
+    description TEXT,
+    category TEXT DEFAULT 'general',
+    priority INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active',
+    visibility TEXT DEFAULT 'private',
+    team_id INTEGER,
+    region TEXT,
+    environment TEXT DEFAULT 'production',
+    alert_threshold REAL DEFAULT 0.95,
+    retention_days INTEGER DEFAULT 90,
+    max_entries INTEGER DEFAULT 10000,
+    source_url TEXT,
+    config_json TEXT,
+    tags TEXT,
+    notes TEXT
+  )
+`);
+
+for (let index = 1; index <= 25; index++) {
+  db.run(
+    `INSERT INTO wide_dashboard (
+      name, owner, region, environment, alert_threshold,
+      retention_days, max_entries, status, category, description,
+      metric_a, metric_b, metric_c, metric_d, metric_e,
+      priority, team_id, tags, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      `Dashboard ${index}`,
+      index % 3 === 0 ? 'alice' : index % 3 === 1 ? 'bob' : 'carol',
+      index % 2 === 0 ? 'us-east' : 'eu-west',
+      'production',
+      0.90 + (index * 0.005),
+      30 + (index * 10),
+      1000 * (index + 1),
+      index % 4 === 0 ? 'archived' : 'active',
+      ['analytics', 'monitoring', 'reporting'][index % 3],
+      `Sample dashboard #${index} for validation purposes`,
+      Math.random() * 100,
+      Math.random() * 100,
+      Math.random() * 100,
+      Math.random() * 100,
+      Math.random() * 100,
+      index % 3,
+      Math.max(1, index % 5),
+      index % 2 === 0 ? 'alpha,beta' : 'gamma,delta,epsilon',
+      index % 7 === 0 ? null : `Wide row ${index}`,
+    ],
+  );
+}
+
 await mkdir(outputDir, { recursive: true });
 await writeFile(outputPath, db.export());
 db.close();

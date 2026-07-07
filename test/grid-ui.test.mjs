@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   getCellInteraction,
+  getObjectItemInteraction,
   getPagerState,
   getRowActions,
   shouldKeepKeyboardShortcutInField,
@@ -47,4 +48,26 @@ test('text editing shortcuts stay inside row detail fields', () => {
   assert.equal(shouldKeepKeyboardShortcutInField({ key: 'a', metaKey: false, ctrlKey: true, targetTagName: 'input' }), true);
   assert.equal(shouldKeepKeyboardShortcutInField({ key: 's', metaKey: true, ctrlKey: false, targetTagName: 'textarea' }), false);
   assert.equal(shouldKeepKeyboardShortcutInField({ key: 'z', metaKey: true, ctrlKey: false, targetTagName: 'button' }), false);
+});
+
+test('tables and views are browsable sidebar objects', () => {
+  assert.deepEqual(getObjectItemInteraction({ objectType: 'table', objectName: 'people', tableName: null }), {
+    browsable: true,
+    title: undefined,
+  });
+  assert.deepEqual(getObjectItemInteraction({ objectType: 'view', objectName: 'active_people', tableName: null }), {
+    browsable: true,
+    title: undefined,
+  });
+});
+
+test('indexes and triggers are not browsable and explain why', () => {
+  assert.deepEqual(getObjectItemInteraction({ objectType: 'index', objectName: 'people_name', tableName: 'people' }), {
+    browsable: false,
+    title: 'people_name is not directly browsable · defined on people',
+  });
+  assert.deepEqual(getObjectItemInteraction({ objectType: 'trigger', objectName: 'people_name_required', tableName: 'people' }), {
+    browsable: false,
+    title: 'people_name_required is not directly browsable · defined on people',
+  });
 });

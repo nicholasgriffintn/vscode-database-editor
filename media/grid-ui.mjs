@@ -66,3 +66,15 @@ export function shouldKeepKeyboardShortcutInField({ key, metaKey, ctrlKey, targe
 
   return new Set(['z', 'y', 'a', 'x', 'c', 'v']).has(String(key).toLowerCase());
 }
+
+export function getObjectItemInteraction({ objectType, objectName, tableName }) {
+  const isBrowsable = objectType === 'table' || objectType === 'view';
+  if (isBrowsable) {
+    return { browsable: true, title: undefined };
+  }
+
+  return {
+    browsable: false,
+    title: `${objectName} is not directly browsable · defined on ${tableName}`,
+  };
+}

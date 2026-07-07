@@ -36,6 +36,12 @@ body,
   margin: 0;
 }
 
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 body {
   overflow: hidden;
   color: var(--text-primary);
@@ -57,7 +63,6 @@ button {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   min-height: 56px;
   padding: 9px 14px;
@@ -67,6 +72,7 @@ button {
 
 .title {
   overflow: hidden;
+  max-width: 100%;
   font-weight: 590;
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
@@ -74,6 +80,7 @@ button {
 }
 
 .title-block {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
 }
@@ -95,6 +102,7 @@ button {
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
+  margin-left: auto;
   padding: 3px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
@@ -133,8 +141,9 @@ button {
 
 .workspace {
   display: grid;
+  flex: 1;
+  min-height: 0;
   grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
-  height: calc(100% - 56px);
 }
 
 .sidebar {
@@ -182,6 +191,15 @@ button {
   background: var(--row-active);
 }
 
+.object-item.secondary {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.object-item.secondary:hover {
+  background: transparent;
+}
+
 .object-name {
   overflow: hidden;
   font-weight: 550;
@@ -190,26 +208,32 @@ button {
 }
 
 .content {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .data-view {
-  display: grid;
-  height: 100%;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .query-view {
-  display: grid;
-  height: 100%;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .schema-panel {
-  display: grid;
-  height: 100%;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .toolbar {
@@ -321,6 +345,7 @@ button {
 
 .grid-wrap,
 .query-output {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -331,15 +356,12 @@ button {
 }
 
 .data-grid {
-  width: 100%;
-  min-width: 720px;
-  table-layout: fixed;
+  min-width: 100%;
   border-spacing: 0;
 }
 
 .data-grid th,
 .data-grid td {
-  max-width: 360px;
   border-right: 1px solid var(--hairline);
   border-bottom: 1px solid var(--hairline);
   padding: 0;
@@ -497,7 +519,8 @@ button {
 }
 
 .schema-view {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   margin: 0;
   padding: 18px;
   overflow: auto;
@@ -577,6 +600,39 @@ button {
 .error-state {
   padding: 20px;
   color: var(--muted);
+}
+
+.grid-empty-cell {
+  padding: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.grid-empty-state {
+  display: grid;
+  gap: 6px;
+  min-height: 220px;
+  align-content: center;
+  justify-content: center;
+  padding: 36px 24px;
+  text-align: center;
+}
+
+.empty-state-title {
+  color: var(--text-primary);
+  font-weight: 590;
+}
+
+.empty-state-description {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.empty-state-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 .error-state,
