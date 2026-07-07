@@ -1,21 +1,59 @@
 {
   "name": "vscode-database-editor",
   "displayName": "Database Editor",
-  "description": "View and edit SQLite databases directly in VS Code.",
   "version": "0.0.1",
   "publisher": "NicholasGriffin",
   "license": "Apache-2.0",
+  "icon": "images/database-editor-icon.png",
   "packageManager": "pnpm@10.28.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicholasgriffintn/vscode-database-editor.git"
+  },
+  "homepage": "https://github.com/nicholasgriffintn/vscode-database-editor#readme",
+  "bugs": {
+    "url": "https://github.com/nicholasgriffintn/vscode-database-editor/issues"
+  },
   "engines": {
     "vscode": "^1.125.0"
   },
   "categories": [
     "Other"
   ],
+  "keywords": [
+    "sqlite",
+    "database",
+    "sql",
+    "editor",
+    "data",
+    "db",
+    "sqlite3",
+    "query",
+    "viewer",
+    "table"
+  ],
+  "galleryBanner": {
+    "color": "#1a1b26",
+    "theme": "dark"
+  },
+  "pricing": "Free",
   "activationEvents": [
     "onCustomEditor:databaseEditor.sqlite"
   ],
   "main": "./dist/extension.js",
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": {
+      "supported": true
+    },
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "markdown": "github",
   "contributes": {
     "customEditors": [
       {
