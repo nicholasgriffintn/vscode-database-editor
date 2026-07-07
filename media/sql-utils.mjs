@@ -2,12 +2,22 @@ export function quoteIdentifier(identifier) {
   return `"${String(identifier).replaceAll('"', '""')}"`;
 }
 
-export function buildTableSelect({ tableName, columns, filter, sortColumn, sortDirection, limit, offset, includeRowid = true }) {
+export function buildTableSelect({
+  tableName,
+  columns,
+  filter,
+  columnFilters = {},
+  sortColumn,
+  sortDirection,
+  limit,
+  offset,
+  includeRowid = true,
+}) {
   const visibleColumns = columns.map((column) => `${quoteIdentifier(column.name)}`).join(', ');
   const identityColumn = includeRowid ? 'rowid AS __database_editor_rowid' : null;
   const selectColumns = [identityColumn, visibleColumns].filter(Boolean).join(', ') || '*';
   const params = [];
-  const where = buildFilterClause(columns, filter, params);
+  const where = buildFilterClause(columns, filter, columnFilters, params);
   const order = sortColumn
     ? ` ORDER BY ${quoteIdentifier(sortColumn)} ${sortDirection === 'desc' ? 'DESC' : 'ASC'}`
     : '';
@@ -18,9 +28,9 @@ export function buildTableSelect({ tableName, columns, filter, sortColumn, sortD
   };
 }
 
-export function buildTableCount({ tableName, columns, filter }) {
+export function buildTableCount({ tableName, columns, filter, columnFilters = {} }) {
   const params = [];
-  const where = buildFilterClause(columns, filter, params);
+  const where = buildFilterClause(columns, filter, columnFilters, params);
   return {
     sql: `SELECT COUNT(*) AS count FROM ${quoteIdentifier(tableName)}${where}`,
     params,
@@ -155,23 +165,56 @@ export function buildSqlDump({ schema, tables }) {
   return lines.join('\n');
 }
 
-function buildFilterClause(columns, filter, params) {
-  const trimmed = filter.trim();
+function buildFilterClause(columns, filter, columnFilters, params) {
+  const predicates = [];
+  const trimmed = String(filter ?? '').trim();
+  const searchableColumns = columns.filter((column) => column.name);
+  if (trimmed && searchableColumns.length > 0) {
+    params.push(...searchableColumns.map(() => `%${trimmed}%`));
+    const globalPredicate = searchableColumns
+      .map((column) => `CAST(${quoteIdentifier(column.name)} AS TEXT) LIKE ?`)
+      .join(' OR ');
+    predicates.push(hasColumnFilters(columnFilters) ? `(${globalPredicate})` : globalPredicate);
+  }
+
+  for (const column of columns) {
+    const predicate = buildColumnFilterPredicate(column, columnFilters[column.name], params);
+    if (predicate) {
+      predicates.push(predicate);
+    }
+  }
+
+  return predicates.length > 0 ? ` WHERE ${predicates.join(' AND ')}` : '';
+}
+
+function buildColumnFilterPredicate(column, filter, params) {
+  const trimmed = String(filter ?? '').trim();
   if (!trimmed) {
     return '';
   }
 
-  const searchableColumns = columns.filter((column) => column.name);
-  if (searchableColumns.length === 0) {
-    return '';
+  const identifier = quoteIdentifier(column.name);
+  const normalized = trimmed.toLowerCase().replace(/\s+/g, ' ');
+  if (['null', 'is null', '= null'].includes(normalized)) {
+    return `${identifier} IS NULL`;
   }
 
-  params.push(...searchableColumns.map(() => `%${trimmed}%`));
-  const predicates = searchableColumns
-    .map((column) => `CAST(${quoteIdentifier(column.name)} AS TEXT) LIKE ?`)
-    .join(' OR ');
+  if (['not null', 'is not null', '!= null', '<> null'].includes(normalized)) {
+    return `${identifier} IS NOT NULL`;
+  }
 
-  return ` WHERE ${predicates}`;
+  const operatorMatch = /^(<=|>=|!=|<>|=|<|>)\s*(.+)$/.exec(trimmed);
+  if (operatorMatch) {
+    params.push(operatorMatch[2]);
+    return `${identifier} ${operatorMatch[1]} ?`;
+  }
+
+  params.push(`%${trimmed}%`);
+  return `CAST(${identifier} AS TEXT) LIKE ?`;
+}
+
+function hasColumnFilters(columnFilters) {
+  return Object.values(columnFilters).some((value) => String(value ?? '').trim() !== '');
 }
 
 function stripSqlComments(sql) {

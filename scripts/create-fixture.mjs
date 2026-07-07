@@ -43,6 +43,23 @@ db.run(`
   LEFT JOIN teams ON teams.id = people.team_id
   WHERE people.active = 1
 `);
+db.run(`
+  CREATE TABLE assets (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    payload BLOB NOT NULL
+  )
+`);
+db.run(`
+  CREATE TABLE event_log (
+    id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    notes TEXT
+  )
+`);
 
 db.run('INSERT INTO teams (name) VALUES (?), (?)', ['Engineering', 'Data']);
 db.run(
@@ -65,6 +82,36 @@ db.run(
     'Orbital mechanics',
   ],
 );
+db.run(
+  'INSERT INTO assets (name, mime_type, payload) VALUES (?, ?, ?)',
+  [
+    'single-pixel.png',
+    'image/png',
+    new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+      0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+      0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+      0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+      0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d,
+      0xb0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+      0x44, 0xae, 0x42, 0x60, 0x82,
+    ]),
+  ],
+);
+
+for (let index = 1; index <= 350; index += 1) {
+  db.run(
+    'INSERT INTO event_log (category, occurred_at, duration_ms, notes) VALUES (?, ?, ?, ?)',
+    [
+      index % 2 === 0 ? 'sync' : 'query',
+      `2026-01-${String((index % 28) + 1).padStart(2, '0')}T12:${String(index % 60).padStart(2, '0')}:00Z`,
+      20 + index,
+      index % 5 === 0 ? null : `Fixture event ${index}`,
+    ],
+  );
+}
 
 await mkdir(outputDir, { recursive: true });
 await writeFile(outputPath, db.export());

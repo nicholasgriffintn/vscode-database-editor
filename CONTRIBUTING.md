@@ -14,6 +14,28 @@ Run the full validation workflow locally:
 pnpm run validate:local
 ```
 
+## Vendored runtime files
+
+The SQLite runtime used by the webview lives in `media/vendor/sqljs`. These files are copied from the installed `sql.js` package:
+
+- `sql-wasm.js`
+- `sql-wasm.wasm`
+- `LICENSE.sql.js`
+
+They are built upstream by `sql.js`, which compiles SQLite to WebAssembly with Emscripten. This repository does not build SQLite or the WASM file directly.
+
+Refresh the vendored files after changing the `sql.js` dependency:
+
+```sh
+pnpm run vendor:sqljs
+```
+
+Check the committed files match the installed package:
+
+```sh
+pnpm run vendor:sqljs:check
+```
+
 Test the extension in VS Code using the built-in Extension Development Host:
 
 - Open this folder in VS Code.

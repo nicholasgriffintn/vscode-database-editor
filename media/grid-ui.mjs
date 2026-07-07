@@ -40,10 +40,15 @@ export function getRowActions({ tableType, rowIndex }) {
   ];
 }
 
-export function getPagerState({ page, pageSize, totalRows }) {
-  const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
+export function getPagerState({ page, pageSize, filteredRows, totalRows }) {
+  const visibleRows = filteredRows ?? totalRows;
+  const pageCount = Math.max(1, Math.ceil(visibleRows / pageSize));
+  const firstVisible = visibleRows === 0 ? 0 : ((page - 1) * pageSize) + 1;
+  const lastVisible = Math.min(page * pageSize, visibleRows);
   return {
-    label: `Page ${page} of ${pageCount} · ${totalRows} rows`,
+    label: totalRows === visibleRows
+      ? `Rows ${firstVisible}-${lastVisible} of ${visibleRows}`
+      : `Rows ${firstVisible}-${lastVisible} of ${visibleRows} filtered · ${totalRows} total`,
     canGoPrevious: page > 1,
     canGoNext: page < pageCount,
   };

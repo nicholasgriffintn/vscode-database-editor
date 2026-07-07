@@ -1,4 +1,9 @@
 import { createElement, clear } from './dom-utils.mjs';
+import {
+  describeBlob,
+  detectBlobMediaType,
+  getBlobFileExtension,
+} from './blob-utils.mjs';
 import { safeFileName } from './file-utils.mjs';
 import {
   getCellInteraction,
@@ -44,6 +49,8 @@ let tables = [];
 let activeTableName = null;
 let activeView = 'data';
 let filter = '';
+let columnFilters = {};
+let objectFilter = '';
 let sortColumn = null;
 let sortDirection = 'asc';
 let page = 1;
@@ -232,6 +239,7 @@ function buildShell() {
 
   app.addEventListener('click', handleClick);
   app.addEventListener('dblclick', handleDoubleClick);
+  app.addEventListener('input', handleInput);
   filterInput.addEventListener('input', async () => {
     filter = filterInput.value;
     page = 1;
@@ -275,6 +283,30 @@ function buildShell() {
   };
 }
 
+async function handleInput(event) {
+  const columnFilter = event.target.closest?.('[data-column-filter]');
+  if (columnFilter) {
+    const columnName = columnFilter.dataset.columnFilter;
+    const value = columnFilter.value.trim();
+    if (value) {
+      columnFilters[columnName] = value;
+    } else {
+      delete columnFilters[columnName];
+    }
+    page = 1;
+    await refreshRows();
+    focusColumnFilter(columnName);
+    return;
+  }
+
+  const objectSearch = event.target.closest?.('[data-object-search]');
+  if (objectSearch) {
+    objectFilter = objectSearch.value;
+    renderSidebar();
+    focusObjectSearch();
+  }
+}
+
 async function openDatabase(name, data) {
   try {
     elements.status.textContent = 'Opening database...';
@@ -285,6 +317,10 @@ async function openDatabase(name, data) {
     elements.title.textContent = name;
     selectedRow = null;
     page = 1;
+    filter = '';
+    columnFilters = {};
+    objectFilter = '';
+    elements.filterInput.value = '';
     sortColumn = null;
     sortDirection = 'asc';
     await refreshTables();
@@ -319,7 +355,7 @@ async function refreshRows() {
   }
 
   try {
-    const countQuery = buildTableCount({ tableName: table.name, columns: table.columns, filter });
+    const countQuery = buildTableCount({ tableName: table.name, columns: table.columns, filter, columnFilters });
     totalRows = queryAll(db, countQuery.sql, countQuery.params)[0]?.count ?? 0;
     const maxPage = Math.max(1, Math.ceil(totalRows / pageSize));
     page = Math.min(page, maxPage);
@@ -327,6 +363,7 @@ async function refreshRows() {
       tableName: table.name,
       columns: table.columns,
       filter,
+      columnFilters,
       sortColumn,
       sortDirection,
       limit: pageSize,
@@ -346,33 +383,72 @@ async function refreshRows() {
 
 function renderSidebar() {
   clear(elements.sidebar);
-  elements.sidebar.append(createElement('div', { className: 'sidebar-heading', text: 'Tables and views' }));
+  const search = createElement('input', {
+    className: 'object-search',
+    attributes: {
+      type: 'search',
+      placeholder: 'Search objects',
+      value: objectFilter,
+      'data-object-search': 'true',
+    },
+  });
+  elements.sidebar.append(createElement('div', { className: 'object-search-wrap', children: [search] }));
 
-  for (const table of tables) {
-    const button = createElement('button', {
-      className: table.name === activeTableName ? 'object-item active' : 'object-item',
-      attributes: { type: 'button', 'data-table': table.name },
+  appendObjectSection('Tables', tables.filter((table) => table.type === 'table'));
+  appendObjectSection('Views', tables.filter((table) => table.type === 'view'));
+  appendObjectSection('Indexes', schemaObjects.filter((object) => object.type === 'index'));
+  appendObjectSection('Triggers', schemaObjects.filter((object) => object.type === 'trigger'));
+}
+
+function appendObjectSection(label, objects) {
+  const visibleObjects = objects.filter((object) => matchesObjectFilter(object));
+  if (visibleObjects.length === 0) {
+    return;
+  }
+
+  elements.sidebar.append(createElement('div', { className: 'sidebar-heading', text: label }));
+  for (const object of visibleObjects) {
+    const isTableLike = object.type === 'table' || object.type === 'view';
+    const className = [
+      object.name === activeTableName ? 'object-item active' : 'object-item',
+      isTableLike ? '' : 'secondary',
+    ].filter(Boolean).join(' ');
+    const attributes = isTableLike ? { type: 'button', 'data-table': object.name } : {};
+    const tagName = isTableLike ? 'button' : 'div';
+    const meta = isTableLike ? `${object.rowCount} rows` : object.tableName;
+    elements.sidebar.append(createElement(tagName, {
+      className,
+      attributes,
       children: [
-        createElement('span', { className: 'object-name', text: table.name }),
-        createElement('span', { className: 'object-meta', text: `${table.type} · ${table.rowCount}` }),
+        createElement('span', { className: 'object-name', text: object.name }),
+        createElement('span', { className: 'object-meta', text: meta }),
       ],
-    });
-    elements.sidebar.append(button);
+    }));
+  }
+}
+
+function matchesObjectFilter(object) {
+  const normalized = objectFilter.trim().toLowerCase();
+  if (!normalized) {
+    return true;
   }
 
-  const secondaryObjects = schemaObjects.filter((object) => object.type === 'index' || object.type === 'trigger');
-  if (secondaryObjects.length > 0) {
-    elements.sidebar.append(createElement('div', { className: 'sidebar-heading', text: 'Indexes and triggers' }));
-    for (const object of secondaryObjects) {
-      elements.sidebar.append(createElement('div', {
-        className: 'object-item secondary',
-        children: [
-          createElement('span', { className: 'object-name', text: object.name }),
-          createElement('span', { className: 'object-meta', text: `${object.type} · ${object.tableName}` }),
-        ],
-      }));
-    }
-  }
+  return [object.name, object.type, object.tableName]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(normalized));
+}
+
+function focusObjectSearch() {
+  const search = elements.sidebar.querySelector('[data-object-search]');
+  search?.focus();
+  search?.setSelectionRange?.(objectFilter.length, objectFilter.length);
+}
+
+function focusColumnFilter(columnName) {
+  const input = elements.grid.querySelector(`[data-column-filter="${CSS.escape(columnName)}"]`);
+  const valueLength = input?.value.length ?? 0;
+  input?.focus();
+  input?.setSelectionRange?.(valueLength, valueLength);
 }
 
 function renderSchema() {
@@ -426,6 +502,7 @@ function renderGrid() {
   const tableElement = createElement('table', { className: 'data-grid' });
   const thead = createElement('thead');
   const headerRow = createElement('tr');
+  const filterRow = createElement('tr', { className: 'column-filter-row' });
 
   for (const column of table.columns) {
     const sortMarker = sortColumn === column.name ? (sortDirection === 'asc' ? ' ^' : ' v') : '';
@@ -433,9 +510,25 @@ function renderGrid() {
       children: [
         createElement('button', {
           className: 'column-header',
-          text: `${column.name}${sortMarker}`,
-          title: `${column.type || 'value'}${column.primaryKeyOrder ? ' primary key' : ''}`,
+          title: buildColumnTitle(column),
           attributes: { type: 'button', 'data-sort-column': column.name },
+          children: [
+            createElement('span', { className: 'column-name', text: `${column.name}${sortMarker}` }),
+            createElement('span', { className: 'column-badges', children: getColumnBadges(column) }),
+          ],
+        }),
+      ],
+    }));
+    filterRow.append(createElement('th', {
+      children: [
+        createElement('input', {
+          className: 'column-filter-input',
+          attributes: {
+            type: 'search',
+            placeholder: 'Filter',
+            value: columnFilters[column.name] ?? '',
+            'data-column-filter': column.name,
+          },
         }),
       ],
     }));
@@ -443,9 +536,10 @@ function renderGrid() {
 
   if (table.type === 'table') {
     headerRow.append(createElement('th', { className: 'row-actions-heading', text: '' }));
+    filterRow.append(createElement('th', { className: 'row-actions-heading', text: '' }));
   }
 
-  thead.append(headerRow);
+  thead.append(headerRow, filterRow);
   tableElement.append(thead);
 
   const tbody = createElement('tbody');
@@ -466,7 +560,7 @@ function renderGrid() {
         children: [
           createElement('button', {
             className: 'cell-button',
-            text: describeValue(value),
+            text: value instanceof Uint8Array ? describeBlob(value) : describeValue(value),
             title: interaction.title,
             attributes: {
               type: 'button',
@@ -505,6 +599,26 @@ function renderGrid() {
   elements.grid.replaceChildren(tableElement);
 }
 
+function getColumnBadges(column) {
+  return [
+    column.keyKind,
+    column.indexed ? 'IDX' : null,
+    column.affinity,
+  ]
+    .filter(Boolean)
+    .map((label) => createElement('span', { className: 'column-badge', text: label }));
+}
+
+function buildColumnTitle(column) {
+  return [
+    column.type || 'ANY',
+    column.primaryKeyOrder ? `primary key ${column.primaryKeyOrder}` : null,
+    column.foreignKeyTarget ? `foreign key ${column.foreignKeyTarget}` : null,
+    column.indexed ? 'indexed' : null,
+    column.nullable ? 'nullable' : 'not null',
+  ].filter(Boolean).join(' · ');
+}
+
 async function handleClick(event) {
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action) {
@@ -522,6 +636,7 @@ async function handleClick(event) {
   if (tableButton) {
     activeTableName = tableButton.dataset.table;
     page = 1;
+    columnFilters = {};
     sortColumn = null;
     sortDirection = 'asc';
     renderSidebar();
@@ -652,23 +767,29 @@ function showRowDetails(rowIndex, initialColumnName = null) {
   });
 
   const fields = createElement('div', { className: 'row-fields' });
+  const blobPreviewUrls = [];
   for (const column of table.columns) {
     const value = row.values[column.name];
     const isBlob = value instanceof Uint8Array;
     const readOnly = isBlob || column.primaryKeyOrder > 0;
-    const control = createElement(isBlob ? 'div' : 'textarea', {
-      className: isBlob ? 'blob-preview' : 'row-field-input',
-      text: isBlob ? describeValue(value) : undefined,
-      attributes: isBlob
-        ? {}
-        : {
+    const control = isBlob
+      ? createBlobPreview({
+          tableName: table.name,
+          rowIndex,
+          columnName: column.name,
+          value,
+          previewUrls: blobPreviewUrls,
+        })
+      : createElement('textarea', {
+          className: 'row-field-input',
+          attributes: {
             name: column.name,
             rows: String(Math.max(1, Math.min(8, String(value ?? '').split('\n').length))),
             spellcheck: 'false',
             'data-column': column.name,
             readonly: readOnly ? 'true' : undefined,
           },
-    });
+        });
     if (!isBlob) {
       control.value = value === null || value === undefined ? '' : String(value);
     }
@@ -740,7 +861,12 @@ function showRowDetails(rowIndex, initialColumnName = null) {
       dialog.close();
     }
   });
-  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('close', () => {
+    for (const url of blobPreviewUrls) {
+      URL.revokeObjectURL(url);
+    }
+    dialog.remove();
+  });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     await saveRowDetails(table, row, form);
@@ -769,6 +895,47 @@ function showRowDetails(rowIndex, initialColumnName = null) {
     : form.querySelector('[data-column]');
   initialInput?.focus();
   initialInput?.select?.();
+}
+
+function createBlobPreview({ tableName, rowIndex, columnName, value, previewUrls }) {
+  const mediaType = detectBlobMediaType(value);
+  const children = [];
+  if (mediaType?.startsWith('image/')) {
+    const url = URL.createObjectURL(new Blob([value], { type: mediaType }));
+    previewUrls.push(url);
+    children.push(createElement('img', {
+      className: 'blob-image-preview',
+      attributes: { src: url, alt: `${columnName} preview` },
+    }));
+  }
+
+  const download = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Export BLOB',
+    attributes: { type: 'button' },
+  });
+  download.addEventListener('click', () => exportBlobValue({ tableName, rowIndex, columnName, value }));
+
+  children.push(
+    createElement('span', { className: 'blob-description', text: describeBlob(value) }),
+    download,
+  );
+
+  return createElement('div', {
+    className: 'blob-preview',
+    children,
+  });
+}
+
+function exportBlobValue({ tableName, rowIndex, columnName, value }) {
+  const extension = getBlobFileExtension(value);
+  const fileName = safeFileName(`${databaseName}-${tableName}-${rowIndex + 1}-${columnName}.${extension}`);
+  vscode.postMessage({
+    type: 'saveBinary',
+    kind: 'blob',
+    fileName,
+    content: value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
+  });
 }
 
 async function saveRowDetails(table, row, form) {
@@ -1237,11 +1404,16 @@ function renderResultTable(result) {
 }
 
 function updatePager() {
-  const pager = getPagerState({ page, pageSize, totalRows });
+  const table = getActiveTable();
+  const pager = getPagerState({
+    page,
+    pageSize,
+    filteredRows: totalRows,
+    totalRows: table?.rowCount ?? totalRows,
+  });
   elements.pageLabel.textContent = pager.label;
   elements.previousPage.disabled = !pager.canGoPrevious;
   elements.nextPage.disabled = !pager.canGoNext;
-  const table = getActiveTable();
   const editable = table?.type === 'table';
   elements.addRow.disabled = !editable;
   elements.renameTable.disabled = !editable;

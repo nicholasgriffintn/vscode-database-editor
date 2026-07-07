@@ -35,8 +35,8 @@ test('row actions are per-row and table-only', () => {
 });
 
 test('pager state belongs to the bottom-right grid footer', () => {
-  assert.deepEqual(getPagerState({ page: 2, pageSize: 100, totalRows: 250 }), {
-    label: 'Page 2 of 3 · 250 rows',
+  assert.deepEqual(getPagerState({ page: 2, pageSize: 100, filteredRows: 250, totalRows: 1000 }), {
+    label: 'Rows 101-200 of 250 filtered · 1000 total',
     canGoPrevious: true,
     canGoNext: true,
   });

@@ -24,13 +24,19 @@ export function readTableMetadata(db, schemaObjects) {
     WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
     ORDER BY type, name
   `).map((row) => {
+    const foreignKeys = row.type === 'table' ? queryAll(db, `PRAGMA foreign_key_list(${quoteIdentifier(row.name)})`) : [];
+    const indexedColumns = row.type === 'table' ? readIndexedColumns(db, row.name) : new Set();
     const columns = queryAll(db, `PRAGMA table_info(${quoteIdentifier(row.name)})`)
       .map((column) => ({
         name: column.name,
         type: column.type || '',
+        affinity: getTypeAffinity(column.type || ''),
         nullable: column.notnull === 0,
         defaultValue: column.dflt_value,
         primaryKeyOrder: column.pk,
+        keyKind: getColumnKeyKind(column, foreignKeys),
+        indexed: indexedColumns.has(column.name),
+        foreignKeyTarget: getForeignKeyTarget(column.name, foreignKeys),
       }));
 
     return {
@@ -44,7 +50,7 @@ export function readTableMetadata(db, schemaObjects) {
         .map((column) => column.name),
       hasRowid: row.type === 'table' && hasRowid(db, row.name),
       rowCount: getRowCount(db, row.name, columns),
-      foreignKeys: row.type === 'table' ? queryAll(db, `PRAGMA foreign_key_list(${quoteIdentifier(row.name)})`) : [],
+      foreignKeys,
       indexes: schemaObjects.filter((object) => object.type === 'index' && object.tableName === row.name),
       triggers: schemaObjects.filter((object) => object.type === 'trigger' && object.tableName === row.name),
     };
@@ -101,4 +107,50 @@ export function getRowCount(db, tableName, columns) {
   } catch {
     return 0;
   }
+}
+
+function readIndexedColumns(db, tableName) {
+  const columns = new Set();
+  for (const index of queryAll(db, `PRAGMA index_list(${quoteIdentifier(tableName)})`)) {
+    if (index.origin === 'pk') {
+      continue;
+    }
+
+    for (const indexedColumn of queryAll(db, `PRAGMA index_info(${quoteIdentifier(index.name)})`)) {
+      if (indexedColumn.name) {
+        columns.add(indexedColumn.name);
+      }
+    }
+  }
+  return columns;
+}
+
+function getTypeAffinity(type) {
+  const normalized = String(type).toUpperCase();
+  if (normalized.includes('INT')) {
+    return 'INTEGER';
+  }
+  if (normalized.includes('CHAR') || normalized.includes('CLOB') || normalized.includes('TEXT')) {
+    return 'TEXT';
+  }
+  if (normalized.includes('BLOB') || normalized === '') {
+    return 'BLOB';
+  }
+  if (normalized.includes('REAL') || normalized.includes('FLOA') || normalized.includes('DOUB')) {
+    return 'REAL';
+  }
+  return 'NUMERIC';
+}
+
+function getColumnKeyKind(column, foreignKeys) {
+  if (column.pk > 0) {
+    return 'PK';
+  }
+
+  return foreignKeys.some((key) => key.from === column.name) ? 'FK' : null;
+}
+
+function getForeignKeyTarget(columnName, foreignKeys) {
+  const foreignKey = foreignKeys.find((key) => key.from === columnName);
+  return foreignKey ? `${foreignKey.table}.${foreignKey.to}` : null;
 }

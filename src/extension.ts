@@ -108,6 +108,9 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
         case 'saveText':
           await this.saveTextDocument(document, message);
           break;
+        case 'saveBinary':
+          await this.saveBinaryDocument(document, message);
+          break;
       }
     });
   }
@@ -194,6 +197,21 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     await vscode.window.showInformationMessage(`Exported ${message.fileName}.`);
   }
 
+  private async saveBinaryDocument(document: SqliteDocument, message: SaveBinaryMessage): Promise<void> {
+    const defaultUri = document.uri.with({ path: `${dirname(document.uri.path)}/${message.fileName}` });
+    const destination = await vscode.window.showSaveDialog({
+      defaultUri,
+      filters: { 'All files': ['*'] },
+    });
+
+    if (!destination) {
+      return;
+    }
+
+    await vscode.workspace.fs.writeFile(destination, new Uint8Array(message.content));
+    await vscode.window.showInformationMessage(`Exported ${message.fileName}.`);
+  }
+
   private getHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
     const sqlJsUri = webview.asWebviewUri(vscode.Uri.joinPath(
@@ -216,6 +234,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       "default-src 'none'",
       `style-src ${webview.cspSource}`,
       `script-src 'nonce-${nonce}' 'wasm-unsafe-eval' ${webview.cspSource}`,
+      `img-src ${webview.cspSource} blob:`,
       `connect-src ${webview.cspSource}`,
       `font-src ${webview.cspSource}`,
     ].join('; ');
@@ -251,7 +270,8 @@ type WebviewMessage =
   | { type: 'ready' }
   | { type: 'databaseChanged'; data: ArrayBuffer }
   | { type: 'error'; message: string }
-  | SaveTextMessage;
+  | SaveTextMessage
+  | SaveBinaryMessage;
 
 type ExtensionMessage = {
   type: 'loadDatabase';
@@ -270,6 +290,13 @@ type SaveTextMessage = {
   kind: 'csv' | 'sql';
   fileName: string;
   content: string;
+};
+
+type SaveBinaryMessage = {
+  type: 'saveBinary';
+  kind: 'blob';
+  fileName: string;
+  content: ArrayBuffer;
 };
 
 function dirname(path: string): string {

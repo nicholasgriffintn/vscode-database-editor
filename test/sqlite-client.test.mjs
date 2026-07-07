@@ -32,6 +32,17 @@ test('discovers SQLite objects and table metadata', async () => {
   assert.equal(people.indexes[0].name, 'people_name');
   assert.equal(people.triggers[0].name, 'people_name_check');
   assert.equal(people.foreignKeys[0].table, 'teams');
+  assert.deepEqual(people.columns.map((column) => ({
+    name: column.name,
+    affinity: column.affinity,
+    keyKind: column.keyKind,
+    indexed: column.indexed,
+    foreignKeyTarget: column.foreignKeyTarget,
+  })), [
+    { name: 'id', affinity: 'INTEGER', keyKind: 'PK', indexed: false, foreignKeyTarget: null },
+    { name: 'team_id', affinity: 'INTEGER', keyKind: 'FK', indexed: false, foreignKeyTarget: 'teams.id' },
+    { name: 'name', affinity: 'TEXT', keyKind: null, indexed: true, foreignKeyTarget: null },
+  ]);
   db.close();
 });
 

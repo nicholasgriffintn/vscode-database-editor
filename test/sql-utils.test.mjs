@@ -55,6 +55,29 @@ test('builds count query with the same filtering rules', () => {
   assert.deepEqual(query.params, ['%ada%', '%ada%', '%ada%']);
 });
 
+test('builds table queries with global and per-column filters', () => {
+  const query = buildTableSelect({
+    tableName: 'people',
+    columns,
+    filter: 'ada',
+    columnFilters: {
+      id: '>= 10',
+      'display name': 'hopper',
+      score: 'not null',
+    },
+    sortColumn: null,
+    sortDirection: 'asc',
+    limit: 25,
+    offset: 0,
+  });
+
+  assert.equal(
+    query.sql,
+    'SELECT rowid AS __database_editor_rowid, "id", "display name", "score" FROM "people" WHERE (CAST("id" AS TEXT) LIKE ? OR CAST("display name" AS TEXT) LIKE ? OR CAST("score" AS TEXT) LIKE ?) AND "id" >= ? AND CAST("display name" AS TEXT) LIKE ? AND "score" IS NOT NULL LIMIT ? OFFSET ?',
+  );
+  assert.deepEqual(query.params, ['%ada%', '%ada%', '%ada%', '10', '%hopper%', 25, 0]);
+});
+
 test('builds write statements without interpolating values', () => {
   assert.deepEqual(buildInsert({ tableName: 'people', values: { id: 1, 'display name': 'Ada' } }), {
     sql: 'INSERT INTO "people" ("id", "display name") VALUES (?, ?)',
