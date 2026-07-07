@@ -1,0 +1,15 @@
+node_modules/**
+src/**
+test/**
+scripts/**
+.github/**
+.tmp/**
+coverage/**
+*.ts
+tsconfig.json
+pnpm-lock.yaml
+*.vsix
+.git/**
+.gitignore
+.claude/**
+.vscode/**

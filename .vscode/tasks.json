@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Compile",
+      "type": "shell",
+      "command": "pnpm run compile",
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "Create SQLite Fixture",
+      "type": "shell",
+      "command": "pnpm run fixture:sqlite",
+      "problemMatcher": []
+    },
+    {
+      "label": "Prepare Extension Host",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Compile",
+        "Create SQLite Fixture"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

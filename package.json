@@ -1,0 +1,75 @@
+{
+  "name": "vscode-database-editor",
+  "displayName": "Database Editor",
+  "description": "View and edit SQLite databases directly in VS Code.",
+  "version": "0.0.1",
+  "publisher": "nicholasgriffin",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCustomEditor:databaseEditor.sqlite"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "databaseEditor.sqlite",
+        "displayName": "SQLite Database Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.db"
+          },
+          {
+            "filenamePattern": "*.db3"
+          },
+          {
+            "filenamePattern": "*.sqlite"
+          },
+          {
+            "filenamePattern": "*.sqlite3"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "databaseEditor.openAsSqlite",
+        "title": "Open as SQLite Database"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "databaseEditor.openAsSqlite",
+          "group": "navigation@50",
+          "when": "resourceExtname == .db || resourceExtname == .db3 || resourceExtname == .sqlite || resourceExtname == .sqlite3"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "fixture:sqlite": "node scripts/create-fixture.mjs",
+    "test": "pnpm run compile && node --test",
+    "package": "pnpm run compile",
+    "vsce:package": "vsce package --no-dependencies --allow-missing-repository",
+    "validate:local": "pnpm test && pnpm run fixture:sqlite && pnpm run vsce:package",
+    "vscode:prepublish": "pnpm run package"
+  },
+  "dependencies": {
+    "sql.js": "^1.14.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "@types/vscode": "^1.125.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^6.0.3"
+  }
+}

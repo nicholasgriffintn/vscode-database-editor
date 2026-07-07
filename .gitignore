@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build and package output
+dist/
+*.vsix
+
+# Local validation output
+.tmp/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor and OS files
+.DS_Store
+.vscode/*
+!.vscode/
+!.vscode/launch.json
+!.vscode/tasks.json
+.claude/

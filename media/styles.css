@@ -1,0 +1,453 @@
+:root {
+  color-scheme: light dark;
+  --border: var(--vscode-panel-border, #3c3c3c);
+  --muted: var(--vscode-descriptionForeground, #8a8a8a);
+  --focus: var(--vscode-focusBorder, #007fd4);
+  --accent: var(--vscode-button-background, #0e639c);
+  --accent-fg: var(--vscode-button-foreground, #ffffff);
+  --row-hover: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+  --row-active: var(--vscode-list-activeSelectionBackground, rgba(0, 127, 212, 0.22));
+  --cell-null: var(--vscode-disabledForeground, #777777);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  font: var(--vscode-font-size) / 1.45 var(--vscode-font-family);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--vscode-sideBar-background);
+}
+
+.title {
+  font-weight: 650;
+}
+
+.status,
+.object-meta,
+.sidebar-heading,
+.query-message {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.tab,
+.toolbar-button,
+.icon-button,
+.object-item,
+.column-header,
+.cell-button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tab {
+  min-width: 64px;
+  padding: 5px 10px;
+  border-radius: 3px;
+}
+
+.tab.active,
+.toolbar-button.primary {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  height: calc(100% - 52px);
+}
+
+.sidebar {
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--vscode-sideBar-background);
+}
+
+.sidebar-heading {
+  padding: 10px 12px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.object-item {
+  display: grid;
+  width: 100%;
+  gap: 1px;
+  padding: 7px 12px;
+  text-align: left;
+}
+
+.object-item:hover {
+  background: var(--row-hover);
+}
+
+.object-item.active {
+  background: var(--row-active);
+}
+
+.object-name {
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  min-width: 0;
+  min-height: 0;
+}
+
+.data-view {
+  display: grid;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.query-view {
+  display: grid;
+  height: 100%;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.toolbar,
+.query-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.filter-input {
+  width: min(320px, 35vw);
+}
+
+.filter-input,
+.page-size,
+.query-input,
+.cell-editor,
+.insert-field input {
+  min-height: 26px;
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 3px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+}
+
+.filter-input,
+.page-size,
+.cell-editor,
+.insert-field input {
+  padding: 3px 7px;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.grid-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--vscode-editor-background);
+}
+
+.toolbar-button,
+.icon-button {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, transparent);
+}
+
+.icon-button {
+  width: 30px;
+  padding: 0;
+}
+
+.toolbar-button:disabled,
+.icon-button:disabled,
+.cell-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.page-label {
+  min-width: 160px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.grid-wrap,
+.query-output {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.data-grid {
+  width: 100%;
+  min-width: 720px;
+  border-spacing: 0;
+}
+
+.data-grid th,
+.data-grid td {
+  max-width: 360px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0;
+  vertical-align: top;
+}
+
+.data-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.column-header {
+  width: 100%;
+  padding: 7px 8px;
+  color: var(--vscode-editor-foreground);
+  font-weight: 650;
+  text-align: left;
+}
+
+.row-actions-heading,
+.row-actions-cell {
+  width: 1%;
+  min-width: 74px;
+  background: var(--vscode-editor-background);
+  white-space: nowrap;
+}
+
+.row-actions-cell {
+  padding: 3px 6px;
+}
+
+.row-action-button {
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+}
+
+.row-action-button:hover {
+  border-color: var(--border);
+  color: var(--vscode-errorForeground, #f14c4c);
+  background: var(--row-hover);
+}
+
+.cell-button {
+  width: 100%;
+  min-height: 29px;
+  padding: 5px 8px;
+  overflow: hidden;
+  color: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-button:hover,
+.selected-row .cell-button {
+  background: var(--row-hover);
+}
+
+.editable-cell .cell-button:hover {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.cell-editor-wrap {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  gap: 4px;
+  align-items: center;
+  padding: 3px;
+}
+
+.cell-editor {
+  display: block;
+  width: 100%;
+  min-width: 140px;
+  outline: 1px solid var(--focus);
+}
+
+.cell-null-button {
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent);
+}
+
+.null-cell .cell-button {
+  color: var(--cell-null);
+  font-style: italic;
+}
+
+.schema-view {
+  height: 100%;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  white-space: pre-wrap;
+}
+
+.query-view {
+  gap: 0;
+}
+
+.query-input {
+  width: calc(100% - 16px);
+  min-height: 130px;
+  margin: 8px;
+  padding: 8px;
+  resize: vertical;
+  font-family: var(--vscode-editor-font-family), monospace;
+}
+
+.query-output {
+  padding: 0 8px 8px;
+}
+
+.result-grid {
+  margin-top: 8px;
+}
+
+.empty-state,
+.error-state {
+  padding: 20px;
+  color: var(--muted);
+}
+
+.error-state,
+.query-message {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.insert-dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+}
+
+.insert-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.insert-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.insert-fields {
+  display: grid;
+  gap: 8px;
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.insert-field {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.null-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.hidden {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .workspace {
+    grid-template-columns: 150px minmax(0, 1fr);
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+  }
+
+  .filter-input {
+    width: 100%;
+  }
+
+  .insert-field {
+    grid-template-columns: 1fr;
+  }
+}
