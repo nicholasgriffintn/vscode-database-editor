@@ -72,6 +72,49 @@ let queryResults = [];
 let schemaObjects = [];
 let isDirty = false;
 let isSaving = false;
+let pinnedColumns = new Set();
+let columnWidths = {};
+
+function getTypeIcon(affinity) {
+  switch (affinity) {
+    case 'INTEGER': return '#' ;
+    case 'TEXT': return 'Aa';
+    case 'REAL': return '±';
+    case 'BLOB': return '●';
+    default: return '?';
+  }
+}
+
+function getBadgeItems(column) {
+  const items = [];
+  if (column.keyKind) {
+    const isPk = column.keyKind.startsWith('PK');
+    items.push({
+      label: isPk ? 'PK' : 'FK',
+      className: isPk ? 'column-badge column-badge-pk' : 'column-badge column-badge-fk',
+      icon: isPk ? '\u{1F511}' : '\u{1F517}',
+      title: column.primaryKeyOrder
+        ? `Primary key (${column.primaryKeyOrder})`
+        : column.foreignKeyTarget
+          ? `Foreign key \u2192 ${column.foreignKeyTarget}`
+          : column.keyKind,
+    });
+  } else if (column.indexed) {
+    items.push({
+      label: 'IDX',
+      className: 'column-badge column-badge-idx',
+      icon: '\u26A1',
+      title: 'Indexed',
+    });
+  }
+  items.push({
+    label: getTypeIcon(column.affinity || column.type?.[0] || '?'),
+    className: 'column-badge column-badge-type',
+    icon: null,
+    title: column.type || column.affinity || 'ANY',
+  });
+  return items;
+}
 
 const elements = buildShell();
 vscode.postMessage({ type: 'ready' });
@@ -126,17 +169,18 @@ function buildShell() {
 
   const previousPage = createElement('button', {
     className: 'icon-button',
-    text: '<',
+    text: '\u25C0',
     title: 'Previous page',
     attributes: { type: 'button', 'data-action': 'previous-page' },
   });
   const nextPage = createElement('button', {
     className: 'icon-button',
-    text: '>',
+    text: '\u25B6',
     title: 'Next page',
     attributes: { type: 'button', 'data-action': 'next-page' },
   });
-  const pageLabel = createElement('span', { className: 'page-label', text: 'Page 1' });
+  const pageLabel = createElement('span', { className: 'page-label' });
+  const pageRowCount = createElement('span', { className: 'page-row-count' });
   const addRow = createElement('button', {
     className: 'toolbar-button',
     text: 'New row',
@@ -159,6 +203,8 @@ function buildShell() {
   const pager = createElement('footer', {
     className: 'grid-footer',
     children: [
+      pageRowCount,
+      pageSizeSelect,
       previousPage,
       pageLabel,
       nextPage,
@@ -254,7 +300,6 @@ function buildShell() {
         className: 'toolbar',
         children: [
           filterInput,
-          pageSizeSelect,
           createElement('span', { className: 'toolbar-spacer' }),
           exportCsv,
           exportSql,
@@ -307,6 +352,55 @@ function buildShell() {
     }
   });
 
+  let resizeData = null;
+  grid.addEventListener('mousedown', (event) => {
+    const handle = event.target.closest('.col-resize-handle');
+    if (!handle) return;
+    const columnName = handle.dataset.resizeColumn;
+    if (!columnName) return;
+    event.preventDefault();
+    const gridEl = grid.querySelector('.data-grid');
+    if (!gridEl) return;
+    const colIndex = Array.from(gridEl.querySelectorAll('.column-heading-row th')).findIndex((th) =>
+      th.querySelector(`[data-resize-column="${columnName}"]`)
+    );
+    if (colIndex === -1) return;
+    const startX = event.clientX;
+    const th = handle.closest('th');
+    const startWidth = th?.offsetWidth || 120;
+    handle.classList.add('active');
+    resizeData = { columnName, startX, startWidth, handle, colIndex, gridEl };
+
+    function onMouseMove(e) {
+      if (!resizeData) return;
+      const diff = e.clientX - resizeData.startX;
+      const newWidth = Math.max(60, resizeData.startWidth + diff);
+      columnWidths[resizeData.columnName] = newWidth;
+
+      const allRows = resizeData.gridEl.querySelectorAll('tr');
+      for (const tr of allRows) {
+        const cell = tr.children[resizeData.colIndex];
+        if (cell) {
+          cell.style.width = `${newWidth}px`;
+          cell.style.minWidth = `${newWidth}px`;
+          cell.style.maxWidth = `${newWidth}px`;
+        }
+      }
+    }
+
+    function onMouseUp() {
+      if (resizeData) {
+        resizeData.handle?.classList.remove('active');
+      }
+      resizeData = null;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+
   return {
     title,
     status,
@@ -317,6 +411,7 @@ function buildShell() {
     previousPage,
     nextPage,
     pageLabel,
+    pageRowCount,
     addRow,
     exportCsv,
     exportSql,
@@ -592,8 +687,13 @@ function renderGrid() {
   const filterRow = createElement('tr', { className: 'column-filter-row' });
 
   for (const column of table.columns) {
-    const sortMarker = sortColumn === column.name ? (sortDirection === 'asc' ? ' ^' : ' v') : '';
+    const isPinned = pinnedColumns.has(column.name);
+    const colWidth = columnWidths[column.name];
+
+    const sortMarker = sortColumn === column.name ? (sortDirection === 'asc' ? ' \u25B2' : ' \u25BC') : '';
     headerRow.append(createElement('th', {
+      className: isPinned ? 'pinned' : '',
+      style: colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined,
       children: [
         createElement('button', {
           className: 'column-header',
@@ -601,12 +701,29 @@ function renderGrid() {
           attributes: { type: 'button', 'data-sort-column': column.name },
           children: [
             createElement('span', { className: 'column-name', text: `${column.name}${sortMarker}` }),
-            createElement('span', { className: 'column-badges', children: getColumnBadges(column) }),
+            createElement('span', {
+              className: 'column-badges',
+              children: [
+                ...getColumnBadges(column),
+                createElement('button', {
+                  className: `pin-button${isPinned ? ' pinned' : ''}`,
+                  text: '\u{1F4CC}',
+                  title: isPinned ? 'Unpin column' : 'Pin column to left',
+                  attributes: { type: 'button', 'data-pin-column': column.name },
+                }),
+              ],
+            }),
           ],
+        }),
+        createElement('div', {
+          className: 'col-resize-handle',
+          attributes: { 'data-resize-column': column.name },
         }),
       ],
     }));
     filterRow.append(createElement('th', {
+      className: isPinned ? 'pinned' : '',
+      style: colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined,
       children: [
         createElement('input', {
           className: 'column-filter-input',
@@ -662,11 +779,15 @@ function renderGrid() {
     for (const column of table.columns) {
       const value = row.values[column.name];
       const interaction = getCellInteraction({ tableType: table.type, value });
+      const isPinned = pinnedColumns.has(column.name);
+      const colWidth = columnWidths[column.name];
       const cell = createElement('td', {
         className: [
           value === null || value === undefined ? 'null-cell' : '',
           interaction.disabled ? '' : 'editable-cell',
+          isPinned ? 'pinned' : '',
         ].filter(Boolean).join(' '),
+        style: colWidth ? `width:${colWidth}px;min-width:${colWidth}px;max-width:${colWidth}px` : undefined,
         children: [
           createElement('button', {
             className: 'cell-button',
@@ -775,29 +896,47 @@ function buildGridEmptyState(table) {
 }
 
 function getColumnBadges(column) {
-  return [
-    column.keyKind,
-    column.indexed ? 'IDX' : null,
-    column.affinity,
-  ]
-    .filter(Boolean)
-    .map((label) => createElement('span', { className: 'column-badge', text: label }));
+  return getBadgeItems(column).map((item) => {
+    const children = [];
+    if (item.icon) {
+      children.push(createElement('span', { className: 'column-badge-icon', text: item.icon }));
+    }
+    children.push(createElement('span', { text: item.label }));
+    return createElement('span', {
+      className: item.className,
+      title: item.title,
+      children,
+    });
+  });
 }
 
 function buildColumnTitle(column) {
   return [
     column.type || 'ANY',
-    column.primaryKeyOrder ? `primary key ${column.primaryKeyOrder}` : null,
-    column.foreignKeyTarget ? `foreign key ${column.foreignKeyTarget}` : null,
-    column.indexed ? 'indexed' : null,
-    column.nullable ? 'nullable' : 'not null',
-  ].filter(Boolean).join(' · ');
+    column.primaryKeyOrder ? `Primary key (order ${column.primaryKeyOrder})` : null,
+    column.foreignKeyTarget ? `Foreign key \u2192 ${column.foreignKeyTarget}` : null,
+    column.indexed ? 'Indexed' : null,
+    column.nullable ? 'Nullable' : 'Not null',
+    column.defaultValue !== undefined ? `Default: ${column.defaultValue}` : null,
+  ].filter(Boolean).join(' \u00B7 ');
 }
 
 async function handleClick(event) {
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action) {
     await runAction(action, event.target.closest('[data-action]'));
+    return;
+  }
+
+  const pinButton = event.target.closest('[data-pin-column]');
+  if (pinButton) {
+    const columnName = pinButton.dataset.pinColumn;
+    if (pinnedColumns.has(columnName)) {
+      pinnedColumns.delete(columnName);
+    } else {
+      pinnedColumns.add(columnName);
+    }
+    renderGrid();
     return;
   }
 
@@ -1726,7 +1865,8 @@ function updatePager() {
     filteredRows: totalRows,
     totalRows: table?.rowCount ?? totalRows,
   });
-  elements.pageLabel.textContent = pager.label;
+  elements.pageLabel.textContent = `${pager.label}`;
+  elements.pageRowCount.textContent = table ? `${table.rowCount.toLocaleString()} row${table.rowCount !== 1 ? 's' : ''} total` : '';
   elements.previousPage.disabled = !pager.canGoPrevious;
   elements.nextPage.disabled = !pager.canGoNext;
   const editable = table?.type === 'table';

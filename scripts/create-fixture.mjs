@@ -57,9 +57,11 @@ db.run(`
     category TEXT NOT NULL,
     occurred_at TEXT NOT NULL,
     duration_ms INTEGER NOT NULL,
+    people_id INTEGER REFERENCES people(id),
     notes TEXT
   )
 `);
+db.run('CREATE INDEX event_log_people ON event_log (people_id)');
 
 db.run('INSERT INTO teams (name) VALUES (?), (?)', ['Engineering', 'Data']);
 db.run(
@@ -103,11 +105,12 @@ db.run(
 
 for (let index = 1; index <= 350; index += 1) {
   db.run(
-    'INSERT INTO event_log (category, occurred_at, duration_ms, notes) VALUES (?, ?, ?, ?)',
+    'INSERT INTO event_log (category, occurred_at, duration_ms, people_id, notes) VALUES (?, ?, ?, ?, ?)',
     [
       index % 2 === 0 ? 'sync' : 'query',
       `2026-01-${String((index % 28) + 1).padStart(2, '0')}T12:${String(index % 60).padStart(2, '0')}:00Z`,
       20 + index,
+      index % 5 === 0 ? null : (index % 3) + 1,
       index % 5 === 0 ? null : `Fixture event ${index}`,
     ],
   );

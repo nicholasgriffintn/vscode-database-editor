@@ -22,6 +22,10 @@
   --radius-sm: 5px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  --badge-pk: #ffd700;
+  --badge-fk: #58a6ff;
+  --badge-idx: #3fb950;
+  --badge-type: var(--text-secondary);
 }
 
 * {
@@ -34,12 +38,7 @@ body,
   width: 100%;
   height: 100%;
   margin: 0;
-}
-
-#app {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  padding: 0;
 }
 
 body {
@@ -47,6 +46,12 @@ body {
   color: var(--text-primary);
   background: var(--surface-0);
   font: var(--vscode-font-size) / 1.45 var(--vscode-font-family);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 button,
@@ -338,9 +343,14 @@ button {
 }
 
 .page-label {
-  min-width: 160px;
   color: var(--muted);
   text-align: center;
+}
+
+.page-row-count {
+  color: var(--muted);
+  font-size: 12px;
+  margin-right: auto;
 }
 
 .grid-wrap,
@@ -381,11 +391,12 @@ button {
 }
 
 .column-header {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
   width: 100%;
   min-height: var(--grid-header-height);
-  align-content: center;
-  gap: 5px;
   padding: 8px 9px;
   color: var(--text-primary);
   font-weight: 590;
@@ -393,18 +404,25 @@ button {
 }
 
 .column-name {
+  flex: 1 1 auto;
+  min-width: 40px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .column-badges {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 3px;
+  margin-left: auto;
 }
 
+/* === Column type/constraint badges with icons === */
 .column-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   padding: 1px 5px;
   border: 1px solid var(--hairline);
   border-radius: 999px;
@@ -413,6 +431,103 @@ button {
   font-weight: 510;
   line-height: 1.3;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.column-badge-pk {
+  border-color: var(--badge-pk);
+  color: var(--badge-pk);
+  background: rgba(255, 215, 0, 0.1);
+}
+
+.column-badge-fk {
+  border-color: var(--badge-fk);
+  color: var(--badge-fk);
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.column-badge-idx {
+  border-color: var(--badge-idx);
+  color: var(--badge-idx);
+  background: rgba(63, 185, 80, 0.1);
+}
+
+.column-badge-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* === Column pinning (sticky left) === */
+.data-grid .pinned {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--surface-2);
+}
+
+.data-grid td.pinned {
+  background: var(--surface-0);
+}
+
+.data-grid .pinned-column-divider {
+  position: sticky;
+  left: var(--pinned-width, 0px);
+  z-index: 4;
+  width: 0;
+  border-right: 2px solid var(--hairline-strong);
+  pointer-events: none;
+}
+
+/* === Column resize handle === */
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 6;
+}
+
+.col-resize-handle:hover,
+.col-resize-handle.active {
+  background: var(--focus);
+  width: 2px;
+  right: 1px;
+}
+
+.column-heading-row th {
+  position: sticky;
+}
+
+/* === Pin button alongside badges === */
+.pin-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 510;
+  line-height: 1.3;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 100ms ease, background 100ms ease, border-color 100ms ease;
+}
+
+.column-header:hover .pin-button {
+  opacity: 0.7;
+}
+
+.pin-button:hover,
+.pin-button.pinned {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(14, 99, 156, 0.12);
 }
 
 .column-filter-row th {
