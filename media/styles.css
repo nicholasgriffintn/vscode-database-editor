@@ -94,6 +94,10 @@ button {
   background: var(--accent);
 }
 
+.toolbar-button.danger:not(:disabled) {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
@@ -152,8 +156,15 @@ button {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
+.schema-panel {
+  display: grid;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .toolbar,
-.query-toolbar {
+.query-toolbar,
+.schema-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -170,8 +181,9 @@ button {
 .filter-input,
 .page-size,
 .query-input,
-.cell-editor,
-.insert-field input {
+.row-field-input,
+.insert-field input,
+.insert-field select {
   min-height: 26px;
   border: 1px solid var(--vscode-input-border, var(--border));
   border-radius: 3px;
@@ -181,8 +193,9 @@ button {
 
 .filter-input,
 .page-size,
-.cell-editor,
-.insert-field input {
+.row-field-input,
+.insert-field input,
+.insert-field select {
   padding: 3px 7px;
 }
 
@@ -267,10 +280,18 @@ button {
 
 .row-actions-heading,
 .row-actions-cell {
+  position: sticky;
+  right: 0;
+  z-index: 2;
   width: 1%;
-  min-width: 74px;
+  min-width: 118px;
   background: var(--vscode-editor-background);
   white-space: nowrap;
+}
+
+.row-actions-heading {
+  z-index: 3;
+  background: var(--vscode-editorGroupHeader-tabsBackground);
 }
 
 .row-actions-cell {
@@ -279,6 +300,7 @@ button {
 
 .row-action-button {
   min-height: 24px;
+  margin-left: 4px;
   padding: 2px 7px;
   border: 1px solid transparent;
   border-radius: 3px;
@@ -311,30 +333,6 @@ button {
 .editable-cell .cell-button:hover {
   outline: 1px solid var(--focus);
   outline-offset: -1px;
-}
-
-.cell-editor-wrap {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto;
-  gap: 4px;
-  align-items: center;
-  padding: 3px;
-}
-
-.cell-editor {
-  display: block;
-  width: 100%;
-  min-width: 140px;
-  outline: 1px solid var(--focus);
-}
-
-.cell-null-button {
-  min-height: 24px;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--vscode-button-secondaryForeground, inherit);
-  background: var(--vscode-button-secondaryBackground, transparent);
 }
 
 .null-cell .cell-button {
@@ -391,6 +389,93 @@ button {
   border-radius: 4px;
   color: var(--vscode-editor-foreground);
   background: var(--vscode-editor-background);
+}
+
+.row-dialog {
+  width: min(760px, calc(100vw - 40px));
+  max-height: calc(100vh - 48px);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+}
+
+.row-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.row-dialog-form {
+  display: grid;
+  max-height: calc(100vh - 80px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.row-dialog-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.row-dialog-title {
+  overflow: hidden;
+  font-weight: 650;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-fields {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.row-field {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(220px, 1fr) auto auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.row-field-label {
+  overflow: hidden;
+  padding-top: 5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-field-input {
+  width: 100%;
+  min-height: 32px;
+  resize: vertical;
+  font-family: var(--vscode-editor-font-family), monospace;
+}
+
+.row-field-input[readonly] {
+  color: var(--muted);
+  background: var(--vscode-inputOption-hoverBackground, rgba(128, 128, 128, 0.08));
+}
+
+.row-field-meta {
+  min-width: 72px;
+  padding-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.blob-preview {
+  min-height: 28px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  background: var(--vscode-input-background);
 }
 
 .insert-dialog::backdrop {

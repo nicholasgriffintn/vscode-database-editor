@@ -1,3 +1,4 @@
+# Contributing
 
 ## Development
 
@@ -32,7 +33,9 @@ The launch config compiles the extension, creates `.tmp/sample.sqlite`, and open
 Before publishing:
 
 - Replace the placeholder `publisher` value in `package.json` with your Marketplace publisher ID.
-- Configure the repository secret `VSCE_PAT` with a Visual Studio Marketplace token that can manage the publisher.
+- Create an Azure service principal or user-assigned managed identity with a GitHub federated credential for this repository.
+- Add that identity to the Visual Studio Marketplace publisher with the Contributor role.
+- Configure repository secrets for `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`.
 - Create a GitHub release or run the `Publish` workflow manually.
 
-The workflow uses `vsce publish --packagePath` so the Marketplace receives the same VSIX that the workflow built. Microsoft recommends moving away from long-lived Azure DevOps PATs before their December 1, 2026 retirement; keep this workflow secret short-lived and rotate it until Entra ID publishing is available in your GitHub release setup.
+The workflow uses GitHub OIDC through `azure/login` and publishes with `vsce publish --azure-credential --packagePath`, so the Marketplace receives the same VSIX that CI built without storing a long-lived Azure DevOps PAT.

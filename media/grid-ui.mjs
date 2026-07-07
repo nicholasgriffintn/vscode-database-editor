@@ -15,7 +15,7 @@ export function getCellInteraction({ tableType, value }) {
 
   return {
     disabled: false,
-    title: 'Click to edit',
+    title: 'Open row details',
   };
 }
 
@@ -25,6 +25,12 @@ export function getRowActions({ tableType, rowIndex }) {
   }
 
   return [
+    {
+      action: 'edit-row',
+      label: 'Edit row',
+      rowIndex,
+      disabled: false,
+    },
     {
       action: 'delete-row',
       label: 'Delete row',
@@ -41,4 +47,17 @@ export function getPagerState({ page, pageSize, totalRows }) {
     canGoPrevious: page > 1,
     canGoNext: page < pageCount,
   };
+}
+
+export function shouldKeepKeyboardShortcutInField({ key, metaKey, ctrlKey, targetTagName }) {
+  if (!metaKey && !ctrlKey) {
+    return false;
+  }
+
+  const tag = String(targetTagName ?? '').toLowerCase();
+  if (tag !== 'input' && tag !== 'textarea') {
+    return false;
+  }
+
+  return new Set(['z', 'y', 'a', 'x', 'c', 'v']).has(String(key).toLowerCase());
 }

@@ -10,6 +10,8 @@ Free and open source forever.
 - Browse tables, views, row counts, indexes, triggers, columns, primary keys, and foreign keys.
 - Sort and filter table data with a fast paged grid.
 - Edit cells, insert rows, and delete rows.
+- Create, rename, and drop tables.
+- Add and drop columns.
 - Run read-only SQL queries from the query tab.
 - Export visible rows **as** CSV.
 - Export schema and table contents as a SQL dump.

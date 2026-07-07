@@ -4,11 +4,13 @@ import {
   getCellInteraction,
   getPagerState,
   getRowActions,
+  shouldKeepKeyboardShortcutInField,
 } from './grid-ui.mjs';
 import {
   getSchemaObjects,
   queryAll,
   readTableMetadata,
+  runStatement,
   runWrite,
 } from './sqlite-client.mjs';
 import {
@@ -23,6 +25,13 @@ import {
   parseCellInput,
   toCsv,
 } from './sql-utils.mjs';
+import {
+  buildAddColumn,
+  buildCreateTable,
+  buildDropColumn,
+  buildDropTable,
+  buildRenameTable,
+} from './schema-management.mjs';
 
 const vscode = acquireVsCodeApi();
 const app = document.querySelector('#app');
@@ -129,7 +138,42 @@ function buildShell() {
       nextPage,
     ],
   });
-  const schema = createElement('pre', { className: 'schema-view hidden' });
+  const newTable = createElement('button', {
+    className: 'toolbar-button primary',
+    text: 'New table',
+    attributes: { type: 'button', 'data-action': 'new-table' },
+  });
+  const renameTable = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Rename table',
+    attributes: { type: 'button', 'data-action': 'rename-table' },
+  });
+  const addColumn = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Add column',
+    attributes: { type: 'button', 'data-action': 'add-column' },
+  });
+  const dropColumn = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Drop column',
+    attributes: { type: 'button', 'data-action': 'drop-column' },
+  });
+  const dropTable = createElement('button', {
+    className: 'toolbar-button danger',
+    text: 'Drop table',
+    attributes: { type: 'button', 'data-action': 'drop-table' },
+  });
+  const schema = createElement('pre', { className: 'schema-view' });
+  const schemaPanel = createElement('section', {
+    className: 'schema-panel hidden',
+    children: [
+      createElement('div', {
+        className: 'schema-toolbar',
+        children: [newTable, renameTable, addColumn, dropColumn, dropTable],
+      }),
+      schema,
+    ],
+  });
   const queryInput = createElement('textarea', {
     className: 'query-input',
     attributes: { spellcheck: 'false' },
@@ -181,7 +225,7 @@ function buildShell() {
       className: 'workspace',
       children: [
         sidebar,
-        createElement('div', { className: 'content', children: [data, schema, query] }),
+        createElement('div', { className: 'content', children: [data, schemaPanel, query] }),
       ],
     }),
   );
@@ -214,9 +258,15 @@ function buildShell() {
     addRow,
     exportCsv,
     exportSql,
+    newTable,
+    renameTable,
+    addColumn,
+    dropColumn,
+    dropTable,
     grid,
     pager,
     schema,
+    schemaPanel,
     data,
     query,
     queryInput,
@@ -377,10 +427,6 @@ function renderGrid() {
   const thead = createElement('thead');
   const headerRow = createElement('tr');
 
-  if (table.type === 'table') {
-    headerRow.append(createElement('th', { className: 'row-actions-heading', text: '' }));
-  }
-
   for (const column of table.columns) {
     const sortMarker = sortColumn === column.name ? (sortDirection === 'asc' ? ' ^' : ' v') : '';
     headerRow.append(createElement('th', {
@@ -395,6 +441,10 @@ function renderGrid() {
     }));
   }
 
+  if (table.type === 'table') {
+    headerRow.append(createElement('th', { className: 'row-actions-heading', text: '' }));
+  }
+
   thead.append(headerRow);
   tableElement.append(thead);
 
@@ -404,24 +454,6 @@ function renderGrid() {
       className: selectedRow === rowIndex ? 'selected-row' : '',
       attributes: { 'data-row': String(rowIndex) },
     });
-
-    const rowActions = getRowActions({ tableType: table.type, rowIndex });
-    if (rowActions.length > 0) {
-      tr.append(createElement('td', {
-        className: 'row-actions-cell',
-        children: rowActions.map((action) => createElement('button', {
-          className: 'row-action-button danger',
-          text: 'Delete',
-          title: action.label,
-          attributes: {
-            type: 'button',
-            'data-action': action.action,
-            'data-action-row': String(action.rowIndex),
-            disabled: action.disabled ? 'true' : undefined,
-          },
-        })),
-      }));
-    }
 
     for (const column of table.columns) {
       const value = row.values[column.name];
@@ -446,6 +478,24 @@ function renderGrid() {
         ],
       });
       tr.append(cell);
+    }
+
+    const rowActions = getRowActions({ tableType: table.type, rowIndex });
+    if (rowActions.length > 0) {
+      tr.append(createElement('td', {
+        className: 'row-actions-cell',
+        children: rowActions.map((action) => createElement('button', {
+          className: action.action === 'delete-row' ? 'row-action-button danger' : 'row-action-button',
+          text: action.action === 'delete-row' ? 'Delete' : 'Edit',
+          title: action.label,
+          attributes: {
+            type: 'button',
+            'data-action': action.action,
+            'data-action-row': String(action.rowIndex),
+            disabled: action.disabled ? 'true' : undefined,
+          },
+        })),
+      }));
     }
 
     tbody.append(tr);
@@ -493,7 +543,7 @@ async function handleClick(event) {
   if (cellButton) {
     selectedRow = Number(cellButton.dataset.cellRow);
     if (!cellButton.disabled) {
-      startCellEdit(cellButton, selectedRow, cellButton.dataset.cellColumn);
+      showRowDetails(selectedRow, cellButton.dataset.cellColumn);
     }
     return;
   }
@@ -512,7 +562,7 @@ function handleDoubleClick(event) {
     return;
   }
 
-  startCellEdit(cellButton, Number(cellButton.dataset.cellRow), cellButton.dataset.cellColumn);
+  showRowDetails(Number(cellButton.dataset.cellRow), cellButton.dataset.cellColumn);
 }
 
 async function runAction(action, sourceElement = null) {
@@ -529,6 +579,9 @@ async function runAction(action, sourceElement = null) {
         await refreshRows();
       }
       break;
+    case 'edit-row':
+      showRowDetails(Number(sourceElement?.dataset.actionRow));
+      break;
     case 'delete-row':
       await deleteRowAt(Number(sourceElement?.dataset.actionRow));
       break;
@@ -544,6 +597,21 @@ async function runAction(action, sourceElement = null) {
     case 'export-sql':
       exportSqlDump();
       break;
+    case 'new-table':
+      showCreateTableDialog();
+      break;
+    case 'rename-table':
+      showRenameTableDialog();
+      break;
+    case 'add-column':
+      showAddColumnDialog();
+      break;
+    case 'drop-column':
+      showDropColumnDialog();
+      break;
+    case 'drop-table':
+      await dropActiveTable();
+      break;
   }
 }
 
@@ -553,64 +621,203 @@ function setActiveView(view) {
     tab.classList.toggle('active', tab.dataset.view === view);
   }
   elements.data.classList.toggle('hidden', view !== 'data');
-  elements.schema.classList.toggle('hidden', view !== 'schema');
+  elements.schemaPanel.classList.toggle('hidden', view !== 'schema');
   elements.query.classList.toggle('hidden', view !== 'query');
 }
 
-function startCellEdit(button, rowIndex, columnName) {
+function showRowDetails(rowIndex, initialColumnName = null) {
   const table = getActiveTable();
-  if (!table) {
+  if (!table || table.type !== 'table' || Number.isNaN(rowIndex)) {
     return;
   }
 
   const row = visibleRows[rowIndex];
-  const column = table.columns.find((candidate) => candidate.name === columnName);
-  const previousValue = row.values[columnName];
-  const editor = createElement('span', { className: 'cell-editor-wrap' });
-  const input = createElement('input', {
-    className: 'cell-editor',
-    attributes: { type: 'text' },
+  const dialog = createElement('dialog', { className: 'row-dialog' });
+  const form = createElement('form', { className: 'row-dialog-form', attributes: { method: 'dialog' } });
+  const title = createElement('div', {
+    className: 'row-dialog-title',
+    text: `${table.name} / ${rowIndex + 1 + ((page - 1) * pageSize)}`,
   });
-  const nullButton = createElement('button', {
-    className: 'cell-null-button',
-    text: 'Set NULL',
+  const previous = createElement('button', {
+    className: 'icon-button',
+    text: '<',
+    title: 'Previous row',
+    attributes: { type: 'button', disabled: rowIndex <= 0 ? 'true' : undefined },
+  });
+  const next = createElement('button', {
+    className: 'icon-button',
+    text: '>',
+    title: 'Next row',
+    attributes: { type: 'button', disabled: rowIndex >= visibleRows.length - 1 ? 'true' : undefined },
+  });
+
+  const fields = createElement('div', { className: 'row-fields' });
+  for (const column of table.columns) {
+    const value = row.values[column.name];
+    const isBlob = value instanceof Uint8Array;
+    const readOnly = isBlob || column.primaryKeyOrder > 0;
+    const control = createElement(isBlob ? 'div' : 'textarea', {
+      className: isBlob ? 'blob-preview' : 'row-field-input',
+      text: isBlob ? describeValue(value) : undefined,
+      attributes: isBlob
+        ? {}
+        : {
+            name: column.name,
+            rows: String(Math.max(1, Math.min(8, String(value ?? '').split('\n').length))),
+            spellcheck: 'false',
+            'data-column': column.name,
+            readonly: readOnly ? 'true' : undefined,
+          },
+    });
+    if (!isBlob) {
+      control.value = value === null || value === undefined ? '' : String(value);
+    }
+
+    const nullToggle = createElement('input', {
+      attributes: {
+        type: 'checkbox',
+        'data-null-column': column.name,
+        checked: value === null || value === undefined ? 'true' : undefined,
+        disabled: readOnly ? 'true' : undefined,
+      },
+    });
+    fields.append(createElement('label', {
+      className: 'row-field',
+      children: [
+        createElement('span', {
+          className: 'row-field-label',
+          text: column.name,
+          title: `${column.type || 'value'}${column.primaryKeyOrder ? ' primary key' : ''}`,
+        }),
+        control,
+        createElement('span', {
+          className: 'row-field-meta',
+          text: `${column.type || 'ANY'}${column.primaryKeyOrder ? ' · primary key' : ''}`,
+        }),
+        createElement('span', {
+          className: 'null-toggle',
+          children: [nullToggle, createElement('span', { text: 'NULL' })],
+        }),
+      ],
+    }));
+  }
+
+  const cancel = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Cancel',
     attributes: { type: 'button' },
   });
-  input.value = previousValue === null || previousValue === undefined ? '' : String(previousValue);
-  editor.append(input, nullButton);
-  button.replaceWith(editor);
-  input.focus();
-  input.select();
+  const save = createElement('button', {
+    className: 'toolbar-button primary',
+    text: 'Save changes',
+    attributes: { type: 'submit' },
+  });
+  const remove = createElement('button', {
+    className: 'toolbar-button danger',
+    text: 'Delete row',
+    attributes: { type: 'button' },
+  });
+  form.append(
+    createElement('header', { className: 'row-dialog-header', children: [previous, title, next] }),
+    fields,
+    createElement('div', { className: 'dialog-actions', children: [remove, createElement('span', { className: 'toolbar-spacer' }), cancel, save] }),
+  );
+  dialog.append(form);
+  document.body.append(dialog);
 
-  let committed = false;
-  const commit = async () => {
-    if (committed) {
-      return;
-    }
-    committed = true;
-    await updateCell(table, row, column, input.value, previousValue);
-  };
-  const commitNull = async () => {
-    if (committed) {
-      return;
-    }
-    committed = true;
-    await updateCell(table, row, column, null, previousValue);
-  };
-
-  input.addEventListener('keydown', async (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      await commit();
-    }
-    if (event.key === 'Escape') {
-      committed = true;
-      renderGrid();
+  previous.addEventListener('click', () => {
+    dialog.close();
+    showRowDetails(rowIndex - 1, initialColumnName);
+  });
+  next.addEventListener('click', () => {
+    dialog.close();
+    showRowDetails(rowIndex + 1, initialColumnName);
+  });
+  cancel.addEventListener('click', () => dialog.close());
+  remove.addEventListener('click', async () => {
+    if (window.confirm(`Delete row ${rowIndex + 1}?`)) {
+      await deleteRowAt(rowIndex);
+      dialog.close();
     }
   });
-  input.addEventListener('blur', commit);
-  nullButton.addEventListener('mousedown', (event) => event.preventDefault());
-  nullButton.addEventListener('click', commitNull);
+  dialog.addEventListener('close', () => dialog.remove());
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await saveRowDetails(table, row, form);
+    dialog.close();
+  });
+  dialog.addEventListener('keydown', (event) => {
+    if (shouldKeepKeyboardShortcutInField({
+      key: event.key,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      targetTagName: event.target?.tagName,
+    })) {
+      event.stopPropagation();
+      return;
+    }
+
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  dialog.showModal();
+
+  const initialInput = initialColumnName
+    ? form.querySelector(`[data-column="${CSS.escape(initialColumnName)}"]`)
+    : form.querySelector('[data-column]');
+  initialInput?.focus();
+  initialInput?.select?.();
+}
+
+async function saveRowDetails(table, row, form) {
+  const updates = [];
+  try {
+    for (const column of table.columns) {
+      const input = form.elements.namedItem(column.name);
+      if (!input || input.readOnly) {
+        continue;
+      }
+      const nullInput = form.querySelector(`[data-null-column="${CSS.escape(column.name)}"]`);
+      const previousValue = row.values[column.name];
+      const nextValue = nullInput?.checked ? null : input.value;
+      if (String(previousValue ?? '') === String(nextValue ?? '') && !(previousValue == null && nextValue !== null) && !(previousValue !== null && nextValue == null)) {
+        continue;
+      }
+      const update = buildUpdate({
+        tableName: table.name,
+        columnName: column.name,
+        identity: row.identity,
+        primaryKeyColumns: table.primaryKeyColumns,
+      });
+      updates.push({
+        sql: update.sql,
+        params: [parseCellInput(nextValue, column, previousValue), ...update.identityParams],
+      });
+    }
+
+    if (updates.length === 0) {
+      return;
+    }
+
+    db.run('BEGIN IMMEDIATE');
+    try {
+      for (const update of updates) {
+        runStatement(db, update.sql, update.params);
+      }
+      db.run('COMMIT');
+    } catch (error) {
+      db.run('ROLLBACK');
+      throw error;
+    }
+
+    markChanged();
+    await refreshRows();
+    elements.status.textContent = 'Unsaved changes';
+  } catch (error) {
+    reportError(error);
+  }
 }
 
 async function updateCell(table, row, column, input, previousValue) {
@@ -738,6 +945,206 @@ async function insertRow(table, form) {
   }
 }
 
+function showCreateTableDialog() {
+  showSchemaDialog({
+    title: 'Create table',
+    submitText: 'Create',
+    fields: [
+      { name: 'tableName', label: 'Table name', required: true },
+      { name: 'columnName', label: 'First column', value: 'id', required: true },
+      { name: 'type', label: 'Type', value: 'INTEGER', required: true },
+      { name: 'primaryKey', label: 'Primary key', type: 'checkbox', checked: true },
+      { name: 'notNull', label: 'Not null', type: 'checkbox' },
+    ],
+    onSubmit: async (values) => {
+      activeTableName = values.tableName.trim();
+      await applySchemaChange(buildCreateTable({
+        tableName: values.tableName,
+        columns: [{
+          name: values.columnName,
+          type: values.type,
+          primaryKey: values.primaryKey,
+          notNull: values.notNull,
+        }],
+      }));
+    },
+  });
+}
+
+function showRenameTableDialog() {
+  const table = getEditableTable();
+  if (!table) {
+    return;
+  }
+
+  showSchemaDialog({
+    title: `Rename ${table.name}`,
+    submitText: 'Rename',
+    fields: [
+      { name: 'newName', label: 'New table name', value: table.name, required: true },
+    ],
+    onSubmit: async (values) => {
+      activeTableName = values.newName.trim();
+      await applySchemaChange(buildRenameTable({ oldName: table.name, newName: values.newName }));
+    },
+  });
+}
+
+function showAddColumnDialog() {
+  const table = getEditableTable();
+  if (!table) {
+    return;
+  }
+
+  showSchemaDialog({
+    title: `Add column to ${table.name}`,
+    submitText: 'Add column',
+    fields: [
+      { name: 'columnName', label: 'Column name', required: true },
+      { name: 'type', label: 'Type', value: 'TEXT', required: true },
+      { name: 'defaultValue', label: 'Default value' },
+      { name: 'notNull', label: 'Not null', type: 'checkbox' },
+      { name: 'unique', label: 'Unique', type: 'checkbox' },
+    ],
+    onSubmit: async (values) => {
+      await applySchemaChange(buildAddColumn({
+        tableName: table.name,
+        column: {
+          name: values.columnName,
+          type: values.type,
+          defaultValue: values.defaultValue,
+          notNull: values.notNull,
+          unique: values.unique,
+        },
+      }));
+    },
+  });
+}
+
+function showDropColumnDialog() {
+  const table = getEditableTable();
+  if (!table) {
+    return;
+  }
+
+  showSchemaDialog({
+    title: `Drop column from ${table.name}`,
+    submitText: 'Drop column',
+    fields: [
+      {
+        name: 'columnName',
+        label: 'Column',
+        type: 'select',
+        options: table.columns.map((column) => column.name),
+        required: true,
+      },
+    ],
+    onSubmit: async (values) => {
+      await applySchemaChange(buildDropColumn({ tableName: table.name, columnName: values.columnName }));
+    },
+  });
+}
+
+async function dropActiveTable() {
+  const table = getEditableTable();
+  if (!table || !window.confirm(`Drop table "${table.name}"? This cannot be undone after saving.`)) {
+    return;
+  }
+
+  activeTableName = null;
+  await applySchemaChange(buildDropTable({ tableName: table.name }));
+}
+
+async function applySchemaChange(sql) {
+  try {
+    runWrite(db, sql);
+    markChanged();
+    await refreshTables();
+    elements.status.textContent = 'Unsaved schema changes';
+  } catch (error) {
+    reportError(error);
+  }
+}
+
+function showSchemaDialog({ title, submitText, fields, onSubmit }) {
+  const dialog = createElement('dialog', { className: 'insert-dialog schema-dialog' });
+  const form = createElement('form', { attributes: { method: 'dialog' } });
+  const fieldList = createElement('div', { className: 'insert-fields' });
+
+  for (const field of fields) {
+    fieldList.append(createSchemaField(field));
+  }
+
+  const cancel = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Cancel',
+    attributes: { type: 'button' },
+  });
+  const submit = createElement('button', {
+    className: 'toolbar-button primary',
+    text: submitText,
+    attributes: { type: 'submit' },
+  });
+  form.append(
+    createElement('h2', { text: title }),
+    fieldList,
+    createElement('div', { className: 'dialog-actions', children: [cancel, submit] }),
+  );
+  dialog.append(form);
+  document.body.append(dialog);
+
+  cancel.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => dialog.remove());
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await onSubmit(readSchemaForm(form, fields));
+    dialog.close();
+  });
+  dialog.showModal();
+}
+
+function createSchemaField(field) {
+  let control;
+  if (field.type === 'select') {
+    control = createElement('select', { attributes: { name: field.name, required: field.required ? 'true' : undefined } });
+    for (const option of field.options) {
+      control.append(createElement('option', { text: option, attributes: { value: option } }));
+    }
+  } else if (field.type === 'checkbox') {
+    control = createElement('input', {
+      attributes: {
+        type: 'checkbox',
+        name: field.name,
+        checked: field.checked ? 'true' : undefined,
+      },
+    });
+  } else {
+    control = createElement('input', {
+      attributes: {
+        type: 'text',
+        name: field.name,
+        value: field.value,
+        required: field.required ? 'true' : undefined,
+      },
+    });
+  }
+
+  return createElement('label', {
+    className: 'insert-field',
+    children: [
+      createElement('span', { text: field.label }),
+      control,
+    ],
+  });
+}
+
+function readSchemaForm(form, fields) {
+  return Object.fromEntries(fields.map((field) => {
+    const control = form.elements.namedItem(field.name);
+    return [field.name, field.type === 'checkbox' ? control.checked : control.value];
+  }));
+}
+
 function runReadOnlyQuery() {
   clear(elements.queryOutput);
   elements.queryMessage.textContent = '';
@@ -837,12 +1244,21 @@ function updatePager() {
   const table = getActiveTable();
   const editable = table?.type === 'table';
   elements.addRow.disabled = !editable;
+  elements.renameTable.disabled = !editable;
+  elements.addColumn.disabled = !editable;
+  elements.dropColumn.disabled = !editable || table.columns.length === 0;
+  elements.dropTable.disabled = !editable;
   elements.exportCsv.disabled = !table;
   elements.exportSql.disabled = tables.length === 0;
 }
 
 function getActiveTable() {
   return tables.find((table) => table.name === activeTableName) ?? null;
+}
+
+function getEditableTable() {
+  const table = getActiveTable();
+  return table?.type === 'table' ? table : null;
 }
 
 function buildIdentity(table, row) {
