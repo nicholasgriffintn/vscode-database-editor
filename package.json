@@ -51,6 +51,12 @@
       {
         "command": "databaseEditor.openAsSqlite",
         "title": "Open as SQLite Database"
+      },
+      {
+        "command": "databaseEditor.save",
+        "title": "Save Database",
+        "icon": "$(save)",
+        "enablement": "activeCustomEditorId == databaseEditor.sqlite"
       }
     ],
     "menus": {
@@ -59,6 +65,13 @@
           "command": "databaseEditor.openAsSqlite",
           "group": "navigation@50",
           "when": "resourceScheme == file"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "databaseEditor.save",
+          "group": "navigation@1",
+          "when": "activeCustomEditorId == databaseEditor.sqlite"
         }
       ]
     }

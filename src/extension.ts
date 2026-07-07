@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 
+import { cloneData, createSnapshotEditEvent } from './custom-document-history';
+
 const viewType = 'databaseEditor.sqlite';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -20,6 +22,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       await vscode.commands.executeCommand('vscode.openWith', target, viewType);
+    }),
+    vscode.commands.registerCommand('databaseEditor.save', async () => {
+      await vscode.commands.executeCommand('workbench.action.files.save');
     }),
   );
 }
@@ -64,7 +69,7 @@ class SqliteDocument implements vscode.CustomDocument {
 }
 
 class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument> {
-  private readonly changeEmitter = new vscode.EventEmitter<vscode.CustomDocumentContentChangeEvent<SqliteDocument>>();
+  private readonly changeEmitter = new vscode.EventEmitter<vscode.CustomDocumentEditEvent<SqliteDocument>>();
   private readonly panels = new Map<string, Set<vscode.WebviewPanel>>();
 
   readonly onDidChangeCustomDocument = this.changeEmitter.event;
@@ -99,8 +104,10 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
           await this.postDocument(webviewPanel, document);
           break;
         case 'databaseChanged':
-          document.updateData(new Uint8Array(message.data));
-          this.changeEmitter.fire({ document });
+          await this.applyDatabaseChange(document, new Uint8Array(message.data), message.label);
+          break;
+        case 'requestSave':
+          await vscode.commands.executeCommand('workbench.action.files.save');
           break;
         case 'error':
           await vscode.window.showErrorMessage(message.message);
@@ -115,12 +122,14 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     });
   }
 
-  async saveCustomDocument(document: SqliteDocument): Promise<void> {
+  async saveCustomDocument(document: SqliteDocument, cancellation?: vscode.CancellationToken): Promise<void> {
     await vscode.workspace.fs.writeFile(document.uri, document.getData());
+    await this.postToDocumentPanels(document, { type: 'databaseSaved' });
   }
 
   async saveCustomDocumentAs(document: SqliteDocument, destination: vscode.Uri): Promise<void> {
     await vscode.workspace.fs.writeFile(destination, document.getData());
+    await this.postToDocumentPanels(document, { type: 'databaseSaved' });
   }
 
   async revertCustomDocument(document: SqliteDocument): Promise<void> {
@@ -169,6 +178,24 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       name: vscode.workspace.asRelativePath(document.uri),
       data: toArrayBuffer(document.getData()),
     });
+  }
+
+  private async applyDatabaseChange(document: SqliteDocument, data: Uint8Array, label?: string): Promise<void> {
+    const before = cloneData(document.getData());
+    document.updateData(data);
+    this.changeEmitter.fire(createSnapshotEditEvent({
+      document,
+      before,
+      after: data,
+      label: label ?? 'Edit SQLite database',
+      postSnapshot: async (snapshot) => {
+        await this.postToDocumentPanels(document, {
+          type: 'loadDatabase',
+          name: vscode.workspace.asRelativePath(document.uri),
+          data: toArrayBuffer(snapshot),
+        });
+      },
+    }));
   }
 
   private async postToDocumentPanels(document: SqliteDocument, message: ExtensionMessage): Promise<void> {
@@ -268,16 +295,15 @@ function getNonce(): string {
 
 type WebviewMessage =
   | { type: 'ready' }
-  | { type: 'databaseChanged'; data: ArrayBuffer }
+  | { type: 'databaseChanged'; data: ArrayBuffer; label?: string }
+  | { type: 'requestSave' }
   | { type: 'error'; message: string }
   | SaveTextMessage
   | SaveBinaryMessage;
 
-type ExtensionMessage = {
-  type: 'loadDatabase';
-  name: string;
-  data: ArrayBuffer;
-};
+type ExtensionMessage =
+  | { type: 'loadDatabase'; name: string; data: ArrayBuffer }
+  | { type: 'databaseSaved' };
 
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(data.byteLength);

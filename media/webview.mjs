@@ -12,6 +12,13 @@ import {
   shouldKeepKeyboardShortcutInField,
 } from './grid-ui.mjs';
 import {
+  getRowFieldState,
+  getRowValidationErrors,
+  normalizeRowFieldValue,
+  rowValuesEqual,
+} from './row-detail-ui.mjs';
+import { getDirtyStatusText, getSaveButtonState } from './save-state.mjs';
+import {
   getSchemaObjects,
   queryAll,
   readTableMetadata,
@@ -61,6 +68,8 @@ let selectedRow = null;
 let querySql = 'SELECT name, type FROM sqlite_schema ORDER BY type, name;';
 let queryResults = [];
 let schemaObjects = [];
+let isDirty = false;
+let isSaving = false;
 
 const elements = buildShell();
 vscode.postMessage({ type: 'ready' });
@@ -69,12 +78,20 @@ window.addEventListener('message', async (event) => {
   const message = event.data;
   if (message.type === 'loadDatabase') {
     await openDatabase(message.name, message.data);
+  } else if (message.type === 'databaseSaved') {
+    handleDatabaseSaved();
   }
 });
 
 function buildShell() {
   const title = createElement('div', { className: 'title', text: 'Loading SQLite database...' });
   const status = createElement('div', { className: 'status', text: 'Waiting for file' });
+  const saveButton = createElement('button', {
+    className: 'toolbar-button primary save-button',
+    text: 'Save',
+    title: 'Save database (Ctrl+S / Cmd+S)',
+    attributes: { type: 'button', 'data-action': 'save-database', disabled: 'true' },
+  });
 
   const dataTab = createElement('button', {
     className: 'tab active',
@@ -175,8 +192,20 @@ function buildShell() {
     className: 'schema-panel hidden',
     children: [
       createElement('div', {
-        className: 'schema-toolbar',
-        children: [newTable, renameTable, addColumn, dropColumn, dropTable],
+        className: 'schema-header',
+        children: [
+          createElement('div', {
+            className: 'schema-heading-copy',
+            children: [
+              createElement('div', { className: 'schema-heading-title', text: 'Schema tools' }),
+              createElement('div', {
+                className: 'schema-heading-description',
+                text: 'Manage the selected table and inspect generated SQLite definitions.',
+              }),
+            ],
+          }),
+          createElement('div', { className: 'schema-toolbar', children: [newTable, renameTable, addColumn, dropColumn, dropTable] }),
+        ],
       }),
       schema,
     ],
@@ -196,7 +225,22 @@ function buildShell() {
   const query = createElement('section', {
     className: 'query-view hidden',
     children: [
-      createElement('div', { className: 'query-toolbar', children: [runQuery, queryMessage] }),
+      createElement('div', {
+        className: 'query-header',
+        children: [
+          createElement('div', {
+            className: 'schema-heading-copy',
+            children: [
+              createElement('div', { className: 'schema-heading-title', text: 'SQL workspace' }),
+              createElement('div', {
+                className: 'schema-heading-description',
+                text: 'Run read-only SELECT statements and inspect result sets without changing the database.',
+              }),
+            ],
+          }),
+          createElement('div', { className: 'query-toolbar', children: [runQuery, queryMessage] }),
+        ],
+      }),
       queryInput,
       queryOutput,
     ],
@@ -224,8 +268,9 @@ function buildShell() {
     createElement('header', {
       className: 'topbar',
       children: [
-        createElement('div', { children: [title, status] }),
+        createElement('div', { className: 'title-block', children: [title, status] }),
         createElement('nav', { className: 'tabs', children: [dataTab, schemaTab, queryTab] }),
+        saveButton,
       ],
     }),
     createElement('main', {
@@ -253,10 +298,17 @@ function buildShell() {
   queryInput.addEventListener('input', () => {
     querySql = queryInput.value;
   });
+  window.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      requestSave();
+    }
+  });
 
   return {
     title,
     status,
+    saveButton,
     tabs: [dataTab, schemaTab, queryTab],
     sidebar,
     filterInput,
@@ -323,11 +375,37 @@ async function openDatabase(name, data) {
     elements.filterInput.value = '';
     sortColumn = null;
     sortDirection = 'asc';
+    isDirty = false;
+    isSaving = false;
     await refreshTables();
-    elements.status.textContent = 'Ready';
+    updateSaveUi();
   } catch (error) {
     reportError(error);
   }
+}
+
+function handleDatabaseSaved() {
+  isDirty = false;
+  isSaving = false;
+  updateSaveUi();
+}
+
+function requestSave() {
+  if (!db || !isDirty || isSaving) {
+    return;
+  }
+
+  isSaving = true;
+  updateSaveUi();
+  vscode.postMessage({ type: 'requestSave' });
+}
+
+function updateSaveUi() {
+  const hasDatabase = Boolean(db);
+  const saveState = getSaveButtonState({ hasDatabase, isDirty, isSaving });
+  elements.saveButton.disabled = saveState.disabled;
+  elements.saveButton.textContent = saveState.label;
+  elements.status.textContent = getDirtyStatusText({ hasDatabase, isDirty, isSaving });
 }
 
 async function refreshTables() {
@@ -501,7 +579,7 @@ function renderGrid() {
 
   const tableElement = createElement('table', { className: 'data-grid' });
   const thead = createElement('thead');
-  const headerRow = createElement('tr');
+  const headerRow = createElement('tr', { className: 'column-heading-row' });
   const filterRow = createElement('tr', { className: 'column-filter-row' });
 
   for (const column of table.columns) {
@@ -535,8 +613,17 @@ function renderGrid() {
   }
 
   if (table.type === 'table') {
-    headerRow.append(createElement('th', { className: 'row-actions-heading', text: '' }));
-    filterRow.append(createElement('th', { className: 'row-actions-heading', text: '' }));
+    headerRow.append(createElement('th', {
+      children: [
+        createElement('div', {
+          className: 'column-header row-actions-heading',
+          children: [
+            createElement('span', { className: 'column-name', text: 'Actions' }),
+          ],
+        }),
+      ],
+    }));
+    filterRow.append(createElement('th', { className: 'row-actions-filter-heading', text: '' }));
   }
 
   thead.append(headerRow, filterRow);
@@ -578,17 +665,22 @@ function renderGrid() {
     if (rowActions.length > 0) {
       tr.append(createElement('td', {
         className: 'row-actions-cell',
-        children: rowActions.map((action) => createElement('button', {
-          className: action.action === 'delete-row' ? 'row-action-button danger' : 'row-action-button',
-          text: action.action === 'delete-row' ? 'Delete' : 'Edit',
-          title: action.label,
-          attributes: {
-            type: 'button',
-            'data-action': action.action,
-            'data-action-row': String(action.rowIndex),
-            disabled: action.disabled ? 'true' : undefined,
-          },
-        })),
+        children: [
+          createElement('div', {
+            className: 'row-action-group',
+            children: rowActions.map((action) => createElement('button', {
+              className: action.action === 'delete-row' ? 'row-action-button danger' : 'row-action-button',
+              text: action.action === 'delete-row' ? 'Delete' : 'Edit',
+              title: action.label,
+              attributes: {
+                type: 'button',
+                'data-action': action.action,
+                'data-action-row': String(action.rowIndex),
+                disabled: action.disabled ? 'true' : undefined,
+              },
+            })),
+          }),
+        ],
       }));
     }
 
@@ -712,6 +804,9 @@ async function runAction(action, sourceElement = null) {
     case 'export-sql':
       exportSqlDump();
       break;
+    case 'save-database':
+      requestSave();
+      break;
     case 'new-table':
       showCreateTableDialog();
       break;
@@ -749,9 +844,13 @@ function showRowDetails(rowIndex, initialColumnName = null) {
   const row = visibleRows[rowIndex];
   const dialog = createElement('dialog', { className: 'row-dialog' });
   const form = createElement('form', { className: 'row-dialog-form', attributes: { method: 'dialog' } });
+  const absoluteRowNumber = rowIndex + 1 + ((page - 1) * pageSize);
   const title = createElement('div', {
-    className: 'row-dialog-title',
-    text: `${table.name} / ${rowIndex + 1 + ((page - 1) * pageSize)}`,
+    className: 'row-dialog-title-block',
+    children: [
+      createElement('div', { className: 'row-dialog-kicker', text: table.name }),
+      createElement('div', { className: 'row-dialog-title', text: `Row ${absoluteRowNumber}` }),
+    ],
   });
   const previous = createElement('button', {
     className: 'icon-button',
@@ -766,6 +865,10 @@ function showRowDetails(rowIndex, initialColumnName = null) {
     attributes: { type: 'button', disabled: rowIndex >= visibleRows.length - 1 ? 'true' : undefined },
   });
 
+  const validationSummary = createElement('div', {
+    className: 'validation-summary hidden',
+    attributes: { role: 'alert' },
+  });
   const fields = createElement('div', { className: 'row-fields' });
   const blobPreviewUrls = [];
   for (const column of table.columns) {
@@ -802,22 +905,48 @@ function showRowDetails(rowIndex, initialColumnName = null) {
         disabled: readOnly ? 'true' : undefined,
       },
     });
-    fields.append(createElement('label', {
+    const dirtyMarker = createElement('span', {
+      className: 'dirty-marker hidden',
+      text: 'Modified',
+    });
+    const reset = createElement('button', {
+      className: 'field-reset-button',
+      text: 'Reset',
+      attributes: {
+        type: 'button',
+        'data-reset-column': column.name,
+        disabled: 'true',
+      },
+    });
+    fields.append(createElement('div', {
       className: 'row-field',
+      attributes: { 'data-field-column': column.name },
       children: [
-        createElement('span', {
-          className: 'row-field-label',
-          text: column.name,
-          title: `${column.type || 'value'}${column.primaryKeyOrder ? ' primary key' : ''}`,
+        createElement('div', {
+          className: 'row-field-label-wrap',
+          children: [
+            createElement('span', {
+              className: 'row-field-label',
+              text: column.name,
+              title: `${column.type || 'value'}${column.primaryKeyOrder ? ' primary key' : ''}`,
+            }),
+            createElement('span', {
+              className: 'row-field-meta',
+              text: buildRowFieldMeta(column),
+            }),
+          ],
         }),
         control,
-        createElement('span', {
-          className: 'row-field-meta',
-          text: `${column.type || 'ANY'}${column.primaryKeyOrder ? ' · primary key' : ''}`,
-        }),
-        createElement('span', {
-          className: 'null-toggle',
-          children: [nullToggle, createElement('span', { text: 'NULL' })],
+        createElement('div', {
+          className: 'row-field-actions',
+          children: [
+            dirtyMarker,
+            createElement('label', {
+              className: 'null-toggle',
+              children: [nullToggle, createElement('span', { text: 'NULL' })],
+            }),
+            reset,
+          ],
         }),
       ],
     }));
@@ -840,6 +969,7 @@ function showRowDetails(rowIndex, initialColumnName = null) {
   });
   form.append(
     createElement('header', { className: 'row-dialog-header', children: [previous, title, next] }),
+    validationSummary,
     fields,
     createElement('div', { className: 'dialog-actions', children: [remove, createElement('span', { className: 'toolbar-spacer' }), cancel, save] }),
   );
@@ -854,6 +984,20 @@ function showRowDetails(rowIndex, initialColumnName = null) {
     dialog.close();
     showRowDetails(rowIndex + 1, initialColumnName);
   });
+  const updateDirtyState = () => updateRowDialogState({ table, row, form, validationSummary, save });
+  fields.addEventListener('input', updateDirtyState);
+  fields.addEventListener('change', updateDirtyState);
+  fields.addEventListener('click', (event) => {
+    const resetButton = event.target.closest?.('[data-reset-column]');
+    if (!resetButton) {
+      return;
+    }
+
+    resetRowField({ form, row, columnName: resetButton.dataset.resetColumn });
+    updateDirtyState();
+  });
+  updateDirtyState();
+
   cancel.addEventListener('click', () => dialog.close());
   remove.addEventListener('click', async () => {
     if (window.confirm(`Delete row ${rowIndex + 1}?`)) {
@@ -869,8 +1013,10 @@ function showRowDetails(rowIndex, initialColumnName = null) {
   });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    await saveRowDetails(table, row, form);
-    dialog.close();
+    const result = await saveRowDetails(table, row, form, validationSummary);
+    if (result.saved) {
+      dialog.close();
+    }
   });
   dialog.addEventListener('keydown', (event) => {
     if (shouldKeepKeyboardShortcutInField({
@@ -895,6 +1041,87 @@ function showRowDetails(rowIndex, initialColumnName = null) {
     : form.querySelector('[data-column]');
   initialInput?.focus();
   initialInput?.select?.();
+}
+
+function buildRowFieldMeta(column) {
+  return [
+    column.type || 'ANY',
+    column.nullable ? 'nullable' : 'not null',
+    column.primaryKeyOrder ? 'primary key' : null,
+    column.foreignKeyTarget ? `FK ${column.foreignKeyTarget}` : null,
+  ].filter(Boolean).join(' · ');
+}
+
+function getCurrentRowFieldValue({ form, column }) {
+  const input = form.elements.namedItem(column.name);
+  if (!input) {
+    return undefined;
+  }
+
+  const nullInput = form.querySelector(`[data-null-column="${CSS.escape(column.name)}"]`);
+  return normalizeRowFieldValue({ inputValue: input.value, nullChecked: nullInput?.checked ?? false });
+}
+
+function updateRowDialogState({ table, row, form, validationSummary, save }) {
+  const validationFields = [];
+  let hasDirtyFields = false;
+  for (const column of table.columns) {
+    const field = form.querySelector(`[data-field-column="${CSS.escape(column.name)}"]`);
+    const input = form.elements.namedItem(column.name);
+    const readOnly = !input || input.readOnly;
+    if (!field) {
+      continue;
+    }
+
+    const nextValue = getCurrentRowFieldValue({ form, column });
+    const state = getRowFieldState({
+      previousValue: row.values[column.name],
+      nextValue,
+      readOnly,
+    });
+    hasDirtyFields ||= state.dirty;
+    field.classList.toggle('dirty', state.dirty);
+    field.querySelector('.dirty-marker')?.classList.toggle('hidden', !state.dirty);
+    const reset = field.querySelector('[data-reset-column]');
+    if (reset) {
+      reset.disabled = state.resetDisabled;
+    }
+    validationFields.push({ column, value: nextValue, readOnly });
+  }
+
+  const errors = getRowValidationErrors(validationFields);
+  renderValidationSummary(validationSummary, errors);
+  save.disabled = errors.length > 0 || !hasDirtyFields;
+}
+
+function resetRowField({ form, row, columnName }) {
+  const input = form.elements.namedItem(columnName);
+  const nullInput = form.querySelector(`[data-null-column="${CSS.escape(columnName)}"]`);
+  if (!input) {
+    return;
+  }
+
+  const previousValue = row.values[columnName];
+  input.value = previousValue === null || previousValue === undefined ? '' : String(previousValue);
+  if (nullInput) {
+    nullInput.checked = previousValue === null || previousValue === undefined;
+  }
+}
+
+function renderValidationSummary(validationSummary, errors) {
+  if (errors.length === 0) {
+    validationSummary.classList.add('hidden');
+    validationSummary.replaceChildren();
+    return;
+  }
+
+  validationSummary.classList.remove('hidden');
+  validationSummary.replaceChildren(
+    createElement('strong', { text: 'Fix validation errors before saving:' }),
+    createElement('ul', {
+      children: errors.map((error) => createElement('li', { text: error })),
+    }),
+  );
 }
 
 function createBlobPreview({ tableName, rowIndex, columnName, value, previewUrls }) {
@@ -938,18 +1165,20 @@ function exportBlobValue({ tableName, rowIndex, columnName, value }) {
   });
 }
 
-async function saveRowDetails(table, row, form) {
+async function saveRowDetails(table, row, form, validationSummary) {
   const updates = [];
+  const validationFields = [];
   try {
     for (const column of table.columns) {
       const input = form.elements.namedItem(column.name);
       if (!input || input.readOnly) {
+        validationFields.push({ column, value: undefined, readOnly: true });
         continue;
       }
-      const nullInput = form.querySelector(`[data-null-column="${CSS.escape(column.name)}"]`);
       const previousValue = row.values[column.name];
-      const nextValue = nullInput?.checked ? null : input.value;
-      if (String(previousValue ?? '') === String(nextValue ?? '') && !(previousValue == null && nextValue !== null) && !(previousValue !== null && nextValue == null)) {
+      const nextValue = getCurrentRowFieldValue({ form, column });
+      validationFields.push({ column, value: nextValue, readOnly: false });
+      if (rowValuesEqual(previousValue, nextValue)) {
         continue;
       }
       const update = buildUpdate({
@@ -964,8 +1193,14 @@ async function saveRowDetails(table, row, form) {
       });
     }
 
+    const validationErrors = getRowValidationErrors(validationFields);
+    if (validationErrors.length > 0) {
+      renderValidationSummary(validationSummary, validationErrors);
+      return { saved: false };
+    }
+
     if (updates.length === 0) {
-      return;
+      return { saved: true };
     }
 
     db.run('BEGIN IMMEDIATE');
@@ -981,9 +1216,10 @@ async function saveRowDetails(table, row, form) {
 
     markChanged();
     await refreshRows();
-    elements.status.textContent = 'Unsaved changes';
+    return { saved: true };
   } catch (error) {
     reportError(error);
+    return { saved: false };
   }
 }
 
@@ -999,7 +1235,6 @@ async function updateCell(table, row, column, input, previousValue) {
     runWrite(db, update.sql, [parsed, ...update.identityParams]);
     markChanged();
     await refreshRows();
-    elements.status.textContent = 'Unsaved changes';
   } catch (error) {
     reportError(error);
     renderGrid();
@@ -1022,7 +1257,6 @@ async function deleteRowAt(rowIndex) {
     runWrite(db, deletion.sql, deletion.params);
     markChanged();
     await refreshTables();
-    elements.status.textContent = 'Unsaved changes';
   } catch (error) {
     reportError(error);
   }
@@ -1106,7 +1340,6 @@ async function insertRow(table, form) {
     runWrite(db, insertion.sql, insertion.params);
     markChanged();
     await refreshTables();
-    elements.status.textContent = 'Unsaved changes';
   } catch (error) {
     reportError(error);
   }
@@ -1227,7 +1460,6 @@ async function applySchemaChange(sql) {
     runWrite(db, sql);
     markChanged();
     await refreshTables();
-    elements.status.textContent = 'Unsaved schema changes';
   } catch (error) {
     reportError(error);
   }
@@ -1442,8 +1674,11 @@ function buildIdentity(table, row) {
 
 function markChanged() {
   const exported = db.export();
+  isDirty = true;
+  updateSaveUi();
   vscode.postMessage({
     type: 'databaseChanged',
+    label: 'Edit SQLite database',
     data: exported.buffer.slice(exported.byteOffset, exported.byteOffset + exported.byteLength),
   });
 }
