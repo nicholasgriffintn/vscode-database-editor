@@ -3,7 +3,7 @@
   "displayName": "Database Editor",
   "description": "View and edit SQLite databases directly in VS Code.",
   "version": "0.0.1",
-  "publisher": "nicholasgriffin",
+  "publisher": "NicholasGriffin",
   "license": "Apache-2.0",
   "packageManager": "pnpm@10.28.0",
   "engines": {

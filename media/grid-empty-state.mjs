@@ -12,5 +12,6 @@ export function getGridEmptyStateKind({ tableType, columnCount, rowCount }) {
 
 export function getGridColumnCount({ columnCount, tableType }) {
   const actionsColumn = tableType === 'table' ? 1 : 0;
-  return Math.max(columnCount + actionsColumn, 1);
+  const rowNumberColumn = 1;
+  return Math.max(columnCount + actionsColumn + rowNumberColumn, 2);
 }

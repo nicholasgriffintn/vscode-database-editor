@@ -1,6 +1,66 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import initSqlJs from 'sql.js';
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  const table = new Int32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) {
+      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c;
+  }
+  for (let i = 0; i < bytes.length; i++) {
+    crc = table[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function chunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const typeB = Buffer.from(type, 'ascii');
+  const crcData = Buffer.concat([typeB, data]);
+  const crcVal = crc32(crcData);
+  const crcB = Buffer.alloc(4);
+  crcB.writeUInt32BE(crcVal);
+  return Buffer.concat([len, typeB, data, crcB]);
+}
+
+function createPNG(width, height, r, g, b, a = 255) {
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  const ihdrData = Buffer.alloc(13);
+  ihdrData.writeUInt32BE(width, 0);
+  ihdrData.writeUInt32BE(height, 4);
+  ihdrData[8] = 8;  // bit depth
+  ihdrData[9] = 6;  // color type RGBA
+  ihdrData[10] = 0; // compression
+  ihdrData[11] = 0; // filter
+  ihdrData[12] = 0; // interlace
+
+  // Build raw pixel data: filter byte (0) + RGBA pixels per row
+  const rawRows = [];
+  const pixel = Buffer.from([r, g, b, a]);
+  for (let y = 0; y < height; y++) {
+    rawRows.push(0); // filter byte: None
+    for (let x = 0; x < width; x++) {
+      rawRows.push(...pixel);
+    }
+  }
+  const rawData = Buffer.from(rawRows);
+  const compressed = zlib.deflateSync(rawData);
+
+  return Buffer.concat([
+    sig,
+    chunk('IHDR', ihdrData),
+    chunk('IDAT', compressed),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
 
 const outputDir = path.join(process.cwd(), '.tmp');
 const outputPath = path.join(outputDir, 'sample.sqlite');
@@ -84,24 +144,24 @@ db.run(
     'Orbital mechanics',
   ],
 );
-db.run(
-  'INSERT INTO assets (name, mime_type, payload) VALUES (?, ?, ?)',
-  [
-    'single-pixel.png',
-    'image/png',
-    new Uint8Array([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-      0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-      0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
-      0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-      0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d,
-      0xb0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
-      0x44, 0xae, 0x42, 0x60, 0x82,
-    ]),
-  ],
+const assets = [
+  { name: 'red-pixel.png', mime_type: 'image/png', payload: createPNG(8, 8, 255, 50, 50) },
+  { name: 'green-pixel.png', mime_type: 'image/png', payload: createPNG(8, 8, 50, 200, 80) },
+  { name: 'blue-pixel.png', mime_type: 'image/png', payload: createPNG(8, 8, 50, 100, 255) },
+  { name: 'yellow-pixel.png', mime_type: 'image/png', payload: createPNG(8, 8, 255, 200, 50) },
+  { name: 'purple-pixel.png', mime_type: 'image/png', payload: createPNG(8, 8, 180, 50, 200) },
+  { name: 'cyan-pixel.png', mime_type: 'image/png', payload: createPNG(8, 8, 50, 220, 200) },
+  { name: 'logo-32x32.png', mime_type: 'image/png', payload: createPNG(32, 32, 30, 120, 210) },
+  { name: 'logo-64x64.png', mime_type: 'image/png', payload: createPNG(64, 64, 40, 140, 220) },
+];
+
+const assetStmt = db.prepare(
+  'INSERT INTO assets (name, mime_type, payload) VALUES (?, ?, ?)'
 );
+for (const asset of assets) {
+  assetStmt.run([asset.name, asset.mime_type, new Uint8Array(asset.payload)]);
+}
+assetStmt.free();
 
 for (let index = 1; index <= 350; index += 1) {
   db.run(

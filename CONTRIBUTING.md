@@ -54,7 +54,7 @@ The launch config compiles the extension, creates `.tmp/sample.sqlite`, and open
 
 Before publishing:
 
-- Replace the placeholder `publisher` value in `package.json` with your Marketplace publisher ID.
+- Replace the `publisher` value in `package.json` with your Marketplace publisher ID if you are not me.
 - Create an Azure service principal or user-assigned managed identity with a GitHub federated credential for this repository.
 - Add that identity to the Visual Studio Marketplace publisher with the Contributor role.
 - Configure repository secrets for `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`.

@@ -29,6 +29,15 @@ export function detectBlobMediaType(value) {
   return signatures.find((signature) => signature.matches(value))?.mediaType ?? null;
 }
 
+export function isImageBlob(value) {
+  return value instanceof Uint8Array && value.length > 0 && signatures.some((s) => s.matches(value));
+}
+
+export function blobToObjectURL(value) {
+  const mediaType = detectBlobMediaType(value) || 'application/octet-stream';
+  return URL.createObjectURL(new Blob([value], { type: mediaType }));
+}
+
 export function getBlobFileExtension(value) {
   return signatures.find((signature) => signature.matches(value))?.extension ?? 'blob';
 }

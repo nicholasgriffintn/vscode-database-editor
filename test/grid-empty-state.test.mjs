@@ -20,8 +20,8 @@ test('grid empty state for views never offers row/column mutation actions', () =
   assert.equal(getGridEmptyStateKind({ tableType: 'view', columnCount: 3, rowCount: 0 }), 'view-no-rows');
 });
 
-test('grid column count includes the actions column for tables only', () => {
-  assert.equal(getGridColumnCount({ columnCount: 4, tableType: 'table' }), 5);
-  assert.equal(getGridColumnCount({ columnCount: 4, tableType: 'view' }), 4);
-  assert.equal(getGridColumnCount({ columnCount: 0, tableType: 'view' }), 1);
+test('grid column count includes the row number column and actions column for tables only', () => {
+  assert.equal(getGridColumnCount({ columnCount: 4, tableType: 'table' }), 6);
+  assert.equal(getGridColumnCount({ columnCount: 4, tableType: 'view' }), 5);
+  assert.equal(getGridColumnCount({ columnCount: 0, tableType: 'view' }), 2);
 });

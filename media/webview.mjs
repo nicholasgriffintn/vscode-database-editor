@@ -3,6 +3,8 @@ import {
   describeBlob,
   detectBlobMediaType,
   getBlobFileExtension,
+  blobToObjectURL,
+  isImageBlob,
 } from './blob-utils.mjs';
 import { safeFileName } from './file-utils.mjs';
 import {
@@ -74,6 +76,9 @@ let isDirty = false;
 let isSaving = false;
 let pinnedColumns = new Set();
 let columnWidths = {};
+let pinnedRows = new Set();
+/** @type {string[]} */
+let gridBlobUrls = [];
 
 function getTypeIcon(affinity) {
   switch (affinity) {
@@ -457,6 +462,11 @@ async function handleInput(event) {
 }
 
 async function openDatabase(name, data) {
+  // Revoke any leftover blob URLs from the previous database
+  for (const url of gridBlobUrls) {
+    URL.revokeObjectURL(url);
+  }
+  gridBlobUrls = [];
   try {
     elements.status.textContent = 'Opening database...';
     SQL ??= await initSqlJs({ locateFile: () => wasmUri });
@@ -467,6 +477,7 @@ async function openDatabase(name, data) {
     selectedRow = null;
     page = 1;
     filter = '';
+    pinnedRows.clear();
     columnFilters = {};
     objectFilter = '';
     elements.filterInput.value = '';
@@ -681,10 +692,34 @@ function renderGrid() {
     return;
   }
 
+  // Revoke stale blob object URLs
+  for (const url of gridBlobUrls) {
+    URL.revokeObjectURL(url);
+  }
+  gridBlobUrls = [];
+  const gridBlobUrlsLocal = [];
+
   const tableElement = createElement('table', { className: 'data-grid' });
   const thead = createElement('thead');
   const headerRow = createElement('tr', { className: 'column-heading-row' });
   const filterRow = createElement('tr', { className: 'column-filter-row' });
+
+  // Row # column (sticky left)
+  headerRow.append(createElement('th', {
+    className: 'row-number-header pinned',
+    children: [
+      createElement('div', {
+        className: 'column-header',
+        children: [
+          createElement('span', { className: 'column-name', text: '#' }),
+        ],
+      }),
+    ],
+  }));
+  filterRow.append(createElement('th', {
+    className: 'row-number-header pinned',
+    text: '',
+  }));
 
   for (const column of table.columns) {
     const isPinned = pinnedColumns.has(column.name);
@@ -771,36 +806,94 @@ function renderGrid() {
   }
 
   for (const [rowIndex, row] of visibleRows.entries()) {
+    const realRowIndex = (page - 1) * pageSize + rowIndex;
+    const isRowPinned = pinnedRows.has(realRowIndex);
     const tr = createElement('tr', {
-      className: selectedRow === rowIndex ? 'selected-row' : '',
+      className: [
+        selectedRow === rowIndex ? 'selected-row' : '',
+        isRowPinned ? 'pinned-row' : '',
+      ].filter(Boolean).join(' '),
       attributes: { 'data-row': String(rowIndex) },
     });
+
+    // Row # cell (sticky left)
+    const rowNumCell = createElement('td', {
+      className: 'row-number-cell pinned',
+      children: [
+        createElement('button', {
+          className: 'row-number-button',
+          attributes: { type: 'button', 'data-row-number': String(rowIndex) },
+          children: [
+            createElement('span', { className: 'row-number-text', text: String(realRowIndex + 1) }),
+            createElement('span', {
+              className: `row-pin-icon${isRowPinned ? ' pinned' : ''}`,
+              text: '\u{1F4CC}',
+              title: isRowPinned ? 'Unpin row' : 'Pin row to top',
+              attributes: { 'data-pin-row': String(rowIndex) },
+            }),
+          ],
+        }),
+      ],
+    });
+    tr.append(rowNumCell);
 
     for (const column of table.columns) {
       const value = row.values[column.name];
       const interaction = getCellInteraction({ tableType: table.type, value });
       const isPinned = pinnedColumns.has(column.name);
       const colWidth = columnWidths[column.name];
+
+      const isImage = isImageBlob(value);
+      let imageURL = null;
+      if (isImage) {
+        imageURL = blobToObjectURL(value);
+        gridBlobUrlsLocal.push(imageURL);
+      }
+      const cellChildren = isImage && imageURL
+        ? [
+            createElement('button', {
+              className: 'cell-button',
+              attributes: {
+                type: 'button',
+                'data-cell-row': String(rowIndex),
+                'data-cell-column': column.name,
+                disabled: interaction.disabled ? 'true' : undefined,
+              },
+              children: [
+                createElement('img', {
+                  className: 'blob-image-inline',
+                  attributes: {
+                    src: imageURL,
+                    alt: describeBlob(value),
+                    title: describeBlob(value),
+                  },
+                }),
+              ],
+            }),
+          ]
+        : [
+            createElement('button', {
+              className: 'cell-button',
+              text: value instanceof Uint8Array ? describeBlob(value) : describeValue(value),
+              title: interaction.title,
+              attributes: {
+                type: 'button',
+                'data-cell-row': String(rowIndex),
+                'data-cell-column': column.name,
+                disabled: interaction.disabled ? 'true' : undefined,
+              },
+            }),
+          ];
+
       const cell = createElement('td', {
         className: [
           value === null || value === undefined ? 'null-cell' : '',
           interaction.disabled ? '' : 'editable-cell',
           isPinned ? 'pinned' : '',
+          isImage ? 'blob-image-cell' : '',
         ].filter(Boolean).join(' '),
         style: colWidth ? `width:${colWidth}px;min-width:${colWidth}px;max-width:${colWidth}px` : undefined,
-        children: [
-          createElement('button', {
-            className: 'cell-button',
-            text: value instanceof Uint8Array ? describeBlob(value) : describeValue(value),
-            title: interaction.title,
-            attributes: {
-              type: 'button',
-              'data-cell-row': String(rowIndex),
-              'data-cell-column': column.name,
-              disabled: interaction.disabled ? 'true' : undefined,
-            },
-          }),
-        ],
+        children: cellChildren,
       });
       tr.append(cell);
     }
@@ -833,6 +926,7 @@ function renderGrid() {
 
   tableElement.append(tbody);
   elements.grid.replaceChildren(tableElement);
+  gridBlobUrls = gridBlobUrlsLocal;
 }
 
 function buildGridEmptyState(table) {
@@ -940,6 +1034,20 @@ async function handleClick(event) {
     return;
   }
 
+  const pinRowIcon = event.target.closest('[data-pin-row]');
+  if (pinRowIcon) {
+    const rowIndex = Number(pinRowIcon.dataset.pinRow);
+    const realRowIndex = (page - 1) * pageSize + rowIndex;
+    if (pinnedRows.has(realRowIndex)) {
+      pinnedRows.delete(realRowIndex);
+    } else {
+      pinnedRows.add(realRowIndex);
+    }
+    selectedRow = rowIndex;
+    renderGrid();
+    return;
+  }
+
   const viewButton = event.target.closest('[data-view]');
   if (viewButton) {
     setActiveView(viewButton.dataset.view);
@@ -953,6 +1061,7 @@ async function handleClick(event) {
     columnFilters = {};
     sortColumn = null;
     sortDirection = 'asc';
+    pinnedRows.clear();
     renderSidebar();
     renderSchema();
     await refreshRows();
