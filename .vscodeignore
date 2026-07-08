@@ -15,4 +15,3 @@ pnpm-lock.yaml
 .codex/**
 .vscode/**
 IDEA.md
-docs/*
