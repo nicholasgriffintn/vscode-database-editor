@@ -4,6 +4,7 @@ import test from 'node:test';
 import initSqlJs from 'sql.js';
 
 import {
+  buildRowCopyContent,
   buildSqlDump,
   buildDelete,
   buildInsert,
@@ -130,6 +131,44 @@ test('exports visible rows as standards-compatible CSV', () => {
   ]);
 
   assert.equal(csv, 'id,name,notes\n1,Ada,"comma, quote "" and newline\ninside"\n2,,[BLOB 3 bytes]\n');
+});
+
+test('copies selected rows in viewer-friendly formats', () => {
+  const copyColumns = ['id', 'display name', 'notes'];
+  const rows = [
+    { id: 1, 'display name': 'Ada Lovelace', notes: 'first programmer' },
+    { id: 2, 'display name': 'Grace Hopper', notes: 'comma, quote " and pipe |' },
+    { id: 3, 'display name': null, notes: new Uint8Array([1, 2, 3]) },
+  ];
+
+  assert.equal(
+    buildRowCopyContent({ format: 'tsv', columns: copyColumns, rows }),
+    'id\tdisplay name\tnotes\n1\tAda Lovelace\tfirst programmer\n2\tGrace Hopper\tcomma, quote " and pipe |\n3\t\t[BLOB 3 bytes]\n',
+  );
+  assert.equal(
+    buildRowCopyContent({ format: 'csv', columns: copyColumns, rows }),
+    'id,display name,notes\n1,Ada Lovelace,first programmer\n2,Grace Hopper,"comma, quote "" and pipe |"\n3,,[BLOB 3 bytes]\n',
+  );
+  assert.equal(
+    buildRowCopyContent({ format: 'sqlite-inserts', tableName: 'people', columns: copyColumns, rows }),
+    'INSERT INTO "people" ("id", "display name", "notes") VALUES (1, \'Ada Lovelace\', \'first programmer\');\nINSERT INTO "people" ("id", "display name", "notes") VALUES (2, \'Grace Hopper\', \'comma, quote " and pipe |\');\nINSERT INTO "people" ("id", "display name", "notes") VALUES (3, NULL, X\'010203\');\n',
+  );
+  assert.equal(
+    buildRowCopyContent({ format: 'json-objects', columns: copyColumns, rows }),
+    '[\n  {\n    "id": 1,\n    "display name": "Ada Lovelace",\n    "notes": "first programmer"\n  },\n  {\n    "id": 2,\n    "display name": "Grace Hopper",\n    "notes": "comma, quote \\" and pipe |"\n  },\n  {\n    "id": 3,\n    "display name": null,\n    "notes": "[BLOB 3 bytes]"\n  }\n]',
+  );
+  assert.equal(
+    buildRowCopyContent({ format: 'json-arrays', columns: copyColumns, rows }),
+    '[\n  [\n    1,\n    "Ada Lovelace",\n    "first programmer"\n  ],\n  [\n    2,\n    "Grace Hopper",\n    "comma, quote \\" and pipe |"\n  ],\n  [\n    3,\n    null,\n    "[BLOB 3 bytes]"\n  ]\n]',
+  );
+  assert.equal(
+    buildRowCopyContent({ format: 'html', columns: copyColumns, rows }),
+    '<table>\n  <thead><tr><th>id</th><th>display name</th><th>notes</th></tr></thead>\n  <tbody>\n    <tr><td>1</td><td>Ada Lovelace</td><td>first programmer</td></tr>\n    <tr><td>2</td><td>Grace Hopper</td><td>comma, quote &quot; and pipe |</td></tr>\n    <tr><td>3</td><td></td><td>[BLOB 3 bytes]</td></tr>\n  </tbody>\n</table>\n',
+  );
+  assert.equal(
+    buildRowCopyContent({ format: 'markdown', columns: copyColumns, rows }),
+    '| id | display name | notes |\n| --- | --- | --- |\n| 1 | Ada Lovelace | first programmer |\n| 2 | Grace Hopper | comma, quote " and pipe \\| |\n| 3 |  | [BLOB 3 bytes] |\n',
+  );
 });
 
 test('exports schema and table data as a SQL dump', () => {

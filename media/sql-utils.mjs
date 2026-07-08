@@ -143,6 +143,36 @@ export function toCsv(columns, rows) {
   return `${lines.join('\n')}\n`;
 }
 
+export function buildRowCopyContent({ format, tableName = 'rows', columns, rows }) {
+  const columnNames = normalizeColumnNames(columns);
+  const exportRows = rows.map((row) => Object.fromEntries(columnNames.map((column) => [column, row[column]])));
+
+  switch (format) {
+    case 'tsv':
+      return toDelimited(columnNames, exportRows, '\t');
+    case 'csv':
+      return toCsv(columnNames, exportRows);
+    case 'sqlite-inserts':
+      return exportRows
+        .map((row) => {
+          const columnList = columnNames.map(quoteIdentifier).join(', ');
+          const values = columnNames.map((column) => serializeSqlLiteral(row[column])).join(', ');
+          return `INSERT INTO ${quoteIdentifier(tableName)} (${columnList}) VALUES (${values});`;
+        })
+        .join('\n') + (exportRows.length > 0 ? '\n' : '');
+    case 'json-objects':
+      return JSON.stringify(exportRows.map(jsonSafeRow), null, 2);
+    case 'json-arrays':
+      return JSON.stringify(exportRows.map((row) => columnNames.map((column) => jsonSafeValue(row[column]))), null, 2);
+    case 'html':
+      return toHtmlTable(columnNames, exportRows);
+    case 'markdown':
+      return toMarkdownTable(columnNames, exportRows);
+    default:
+      throw new Error(`Unsupported row copy format: ${format}`);
+  }
+}
+
 export function buildSqlDump({ schema, tables }) {
   const lines = ['BEGIN TRANSACTION;'];
 
@@ -163,6 +193,63 @@ export function buildSqlDump({ schema, tables }) {
 
   lines.push('COMMIT;', '');
   return lines.join('\n');
+}
+
+function normalizeColumnNames(columns) {
+  return columns.map((column) => typeof column === 'string' ? column : column.name);
+}
+
+function toDelimited(columns, rows, delimiter) {
+  const lines = [
+    columns.join(delimiter),
+    ...rows.map((row) => columns.map((column) => describeValueForExport(row[column])).join(delimiter)),
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+function jsonSafeRow(row) {
+  return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, jsonSafeValue(value)]));
+}
+
+function jsonSafeValue(value) {
+  if (value instanceof Uint8Array) {
+    return describeValue(value);
+  }
+  if (typeof value === 'bigint') {
+    return String(value);
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    return null;
+  }
+  return value ?? null;
+}
+
+function toHtmlTable(columns, rows) {
+  const head = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('');
+  const body = rows
+    .map((row) => `    <tr>${columns.map((column) => `<td>${escapeHtml(describeValueForExport(row[column]))}</td>`).join('')}</tr>`)
+    .join('\n');
+  return `<table>\n  <thead><tr>${head}</tr></thead>\n  <tbody>\n${body}\n  </tbody>\n</table>\n`;
+}
+
+function toMarkdownTable(columns, rows) {
+  const header = `| ${columns.map(escapeMarkdownCell).join(' | ')} |`;
+  const separator = `| ${columns.map(() => '---').join(' | ')} |`;
+  const body = rows.map((row) => `| ${columns.map((column) => escapeMarkdownCell(describeValueForExport(row[column]))).join(' | ')} |`);
+  return `${[header, separator, ...body].join('\n')}\n`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function escapeMarkdownCell(value) {
+  return String(value).replaceAll('\\', '\\\\').replaceAll('|', '\\|').replaceAll('\n', '<br>');
 }
 
 function buildFilterClause(columns, filter, columnFilters, params) {

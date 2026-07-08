@@ -36,6 +36,7 @@ import {
   runWrite,
 } from './sqlite-client.mjs';
 import {
+  buildRowCopyContent,
   buildSqlDump,
   buildDelete,
   buildInsert,
@@ -54,6 +55,16 @@ import {
   buildDropTable,
   buildRenameTable,
 } from './schema-management.mjs';
+
+const ROW_COPY_FORMATS = [
+  { value: 'tsv', label: 'TSV' },
+  { value: 'csv', label: 'CSV' },
+  { value: 'sqlite-inserts', label: 'SQLite inserts' },
+  { value: 'json-objects', label: 'JSON objects' },
+  { value: 'json-arrays', label: 'JSON arrays' },
+  { value: 'html', label: 'HTML' },
+  { value: 'markdown', label: 'Markdown' },
+];
 
 const vscode = acquireVsCodeApi();
 const app = document.querySelector('#app');
@@ -223,6 +234,21 @@ function buildShell() {
     title: 'Export database as SQL dump',
     attributes: { type: 'button', 'data-action': 'export-sql' },
   });
+  const copyRowsFormat = createElement('select', {
+    className: 'copy-format',
+    title: 'Copy selected row, or visible rows if no row is selected',
+    attributes: { 'aria-label': 'Copy rows as format' },
+  });
+  copyRowsFormat.append(createElement('option', {
+    text: 'Copy rows as…',
+    attributes: { value: '' },
+  }));
+  for (const format of ROW_COPY_FORMATS) {
+    copyRowsFormat.append(createElement('option', {
+      text: format.label,
+      attributes: { value: format.value },
+    }));
+  }
   const grid = createElement('div', { className: 'grid-wrap' });
   const pager = createElement('footer', {
     className: 'grid-footer',
@@ -327,6 +353,7 @@ function buildShell() {
           createElement('span', { className: 'toolbar-spacer' }),
           exportCsv,
           exportSql,
+          copyRowsFormat,
           addRow,
         ],
       }),
@@ -365,6 +392,13 @@ function buildShell() {
     pageSize = Number(pageSizeSelect.value);
     page = 1;
     await refreshRows();
+  });
+  copyRowsFormat.addEventListener('change', async () => {
+    const format = copyRowsFormat.value;
+    copyRowsFormat.value = '';
+    if (format) {
+      await copyRows(format);
+    }
   });
   queryInput.addEventListener('input', () => {
     querySql = queryInput.value;
@@ -434,6 +468,7 @@ function buildShell() {
     addRow,
     exportCsv,
     exportSql,
+    copyRowsFormat,
     newTable,
     renameTable,
     addColumn,
@@ -843,6 +878,8 @@ function renderGrid() {
   if (!table) {
     return;
   }
+
+  elements.copyRowsFormat.disabled = visibleRows.length === 0;
 
   // Revoke stale blob object URLs
   for (const url of gridBlobUrls) {
@@ -1272,6 +1309,27 @@ async function copyGridCell(rowIndex, columnName) {
   const value = row.values[columnName];
   await writeClipboardText(getCellClipboardText(value));
   elements.status.textContent = `Copied ${columnName}`;
+}
+
+async function copyRows(format) {
+  const table = getActiveTable();
+  if (!table || visibleRows.length === 0) {
+    return;
+  }
+
+  const selectedVisibleRow = Number.isInteger(selectedRow) ? visibleRows[selectedRow] : null;
+  const sourceRows = selectedVisibleRow ? [selectedVisibleRow] : visibleRows;
+  const rows = sourceRows.map((row) => row.values);
+  const columns = table.columns.map((column) => column.name);
+  const content = buildRowCopyContent({
+    format,
+    tableName: table.name,
+    columns,
+    rows,
+  });
+  await writeClipboardText(content);
+  const label = ROW_COPY_FORMATS.find((item) => item.value === format)?.label ?? format;
+  elements.status.textContent = `Copied ${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'} as ${label}`;
 }
 
 async function writeClipboardText(text) {
