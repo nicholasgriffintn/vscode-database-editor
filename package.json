@@ -10,7 +10,7 @@
     "type": "git",
     "url": "https://github.com/nicholasgriffintn/vscode-database-editor.git"
   },
-  "homepage": "https://github.com/nicholasgriffintn/vscode-database-editor#readme",
+  "homepage": "https://dbviewer.app",
   "bugs": {
     "url": "https://github.com/nicholasgriffintn/vscode-database-editor/issues"
   },
@@ -123,6 +123,8 @@
     "package": "pnpm run compile",
     "vsce:package": "vsce package --no-dependencies --allow-missing-repository",
     "validate:local": "pnpm run vendor:sqljs:check && pnpm test && pnpm run fixture:sqlite && pnpm run vsce:package",
+    "website:dev": "wrangler dev --config wrangler.toml",
+    "website:deploy": "wrangler deploy --config wrangler.toml",
     "vscode:prepublish": "pnpm run package"
   },
   "devDependencies": {
@@ -130,6 +132,7 @@
     "@types/node": "^26.1.0",
     "@types/vscode": "^1.125.0",
     "@vscode/vsce": "^3.9.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "wrangler": "^4.108.0"
   }
 }
