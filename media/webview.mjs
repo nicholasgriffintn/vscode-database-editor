@@ -742,7 +742,7 @@ function renderGrid() {
 
     const sortMarker = sortColumn === column.name ? (sortDirection === 'asc' ? ' \u25B2' : ' \u25BC') : '';
     const colStyle = isPinned
-      ? pinnedColStyles[column.name].style
+      ? getPinnedCellStyle({ columnLayout: pinnedColStyles[column.name], zIndex: 45 })
       : (colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined);
     headerRow.append(createElement('th', {
       className: isPinned ? 'pinned' : '',
@@ -780,7 +780,7 @@ function renderGrid() {
       ],
     }));
     const filterStyle = isPinned
-      ? pinnedColStyles[column.name].style
+      ? getPinnedCellStyle({ columnLayout: pinnedColStyles[column.name], zIndex: 42 })
       : (colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined);
     filterRow.append(createElement('th', {
       className: isPinned ? 'pinned' : '',
@@ -847,7 +847,6 @@ function renderGrid() {
         selectedRow === rowIndex ? 'selected-row' : '',
         isRowPinned ? 'pinned-row' : '',
       ].filter(Boolean).join(' '),
-      style: pinnedRowOffset !== undefined ? `top:${pinnedRowOffset}px` : undefined,
       attributes: { 'data-row': String(rowIndex) },
     });
 
@@ -858,8 +857,8 @@ function renderGrid() {
         isRowPinned ? 'pinned-row-cell' : '',
       ].filter(Boolean).join(' '),
       style: getPinnedCellStyle({
-        rowOffset: pinnedRowOffset,
-        zIndex: isRowPinned ? 10 : undefined,
+        rowOffset: isRowPinned ? pinnedRowOffset : undefined,
+        zIndex: isRowPinned ? 20 : undefined,
       }),
       children: [
         createElement('button', {
@@ -932,8 +931,8 @@ function renderGrid() {
         : (colWidth ? { style: `width:${colWidth}px;min-width:${colWidth}px;max-width:${colWidth}px` } : undefined);
       const cellStyle = getPinnedCellStyle({
         columnLayout,
-        rowOffset: pinnedRowOffset,
-        zIndex: isRowPinned && isPinned ? 9 : (isRowPinned ? 8 : (isPinned ? 5 : undefined)),
+        rowOffset: isRowPinned ? pinnedRowOffset : undefined,
+        zIndex: isRowPinned && isPinned ? 20 : (isRowPinned ? 8 : (isPinned ? 5 : undefined)),
       });
       const cell = createElement('td', {
         className: [
@@ -957,7 +956,7 @@ function renderGrid() {
           isRowPinned ? 'pinned-row-cell' : '',
         ].filter(Boolean).join(' '),
         style: getPinnedCellStyle({
-          rowOffset: pinnedRowOffset,
+          rowOffset: isRowPinned ? pinnedRowOffset : undefined,
           zIndex: isRowPinned ? 8 : undefined,
         }),
         children: [

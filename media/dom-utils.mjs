@@ -14,7 +14,7 @@ export function createElement(tagName, options = {}) {
   }
 
   if (options.style !== undefined) {
-    element.setAttribute('style', options.style);
+    applyStyleDeclarations(element, options.style);
   }
 
   if (options.attributes) {
@@ -31,6 +31,23 @@ export function createElement(tagName, options = {}) {
   }
 
   return element;
+}
+
+function applyStyleDeclarations(element, styleText) {
+  for (const declaration of String(styleText).split(';')) {
+    const separator = declaration.indexOf(':');
+    if (separator === -1) {
+      continue;
+    }
+
+    const property = declaration.slice(0, separator).trim();
+    const value = declaration.slice(separator + 1).trim();
+    if (!property || !value) {
+      continue;
+    }
+
+    element.style.setProperty(property, value);
+  }
 }
 
 export function clear(element) {

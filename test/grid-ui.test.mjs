@@ -104,14 +104,21 @@ test('pinned rows stack below both sticky header rows', () => {
   }), undefined);
 });
 
-test('pinned column cell style preserves horizontal offsets and sticky row top', () => {
+test('pinned column cell style preserves horizontal offsets and overrides z-index', () => {
+  assert.equal(getPinnedCellStyle({
+    columnLayout: { style: 'width:240px;min-width:240px;max-width:240px;left:132px;z-index:5' },
+    zIndex: 8,
+  }), 'width:240px;min-width:240px;max-width:240px;left:132px;z-index:8');
   assert.equal(getPinnedCellStyle({
     columnLayout: { style: 'width:240px;min-width:240px;max-width:240px;left:132px;z-index:5' },
     rowOffset: 123,
-    zIndex: 8,
-  }), 'width:240px;min-width:240px;max-width:240px;left:132px;top:123px;z-index:8');
+    zIndex: 20,
+  }), 'width:240px;min-width:240px;max-width:240px;left:132px;top:123px;z-index:20');
   assert.equal(getPinnedCellStyle({
-    rowOffset: 94,
+    rowOffset: 123,
+    zIndex: 8,
+  }), 'top:123px;z-index:8');
+  assert.equal(getPinnedCellStyle({
     zIndex: 7,
-  }), 'top:94px;z-index:7');
+  }), 'z-index:7');
 });

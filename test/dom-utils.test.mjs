@@ -9,6 +9,12 @@ class FakeElement {
     this.className = '';
     this.textContent = '';
     this.title = '';
+    this.style = {
+      declarations: new Map(),
+      setProperty: (property, value) => {
+        this.style.declarations.set(property, value);
+      },
+    };
   }
 
   setAttribute(name, value) {
@@ -28,7 +34,7 @@ globalThis.document = {
 
 const { createElement } = await import('../media/dom-utils.mjs');
 
-test('createElement applies inline styles passed through options', () => {
+test('createElement applies style declarations without setting a style attribute', () => {
   const element = createElement('td', {
     className: 'pinned',
     style: 'width:80px;left:52px;z-index:5',
@@ -36,6 +42,9 @@ test('createElement applies inline styles passed through options', () => {
   });
 
   assert.equal(element.className, 'pinned');
-  assert.equal(element.attributes.get('style'), 'width:80px;left:52px;z-index:5');
+  assert.equal(element.attributes.has('style'), false);
+  assert.equal(element.style.declarations.get('width'), '80px');
+  assert.equal(element.style.declarations.get('left'), '52px');
+  assert.equal(element.style.declarations.get('z-index'), '5');
   assert.equal(element.attributes.get('data-column'), 'id');
 });

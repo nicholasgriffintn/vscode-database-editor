@@ -388,27 +388,29 @@ button {
 
 .data-grid th {
   position: sticky;
-  z-index: 3;
+  z-index: 30;
   background: var(--surface-2);
   box-shadow: inset 0 -1px 0 var(--hairline);
 }
 
 .data-grid .row-number-header {
-  z-index: 10;
+  z-index: 50;
 }
 
 .data-grid td.row-number-cell {
-  z-index: 9;
+  z-index: 15;
 }
 
 .column-heading-row th {
   top: 0;
   height: var(--grid-header-height);
+  z-index: 40;
 }
 
 .column-filter-row th {
   top: var(--grid-header-height);
   height: var(--grid-filter-height);
+  z-index: 35;
 }
 
 .column-header {
@@ -496,9 +498,9 @@ button {
 }
 
 /* === Column pinning (sticky left) === */
-.data-grid .pinned {
+.data-grid th.pinned,
+.data-grid td.pinned {
   position: sticky;
-  left: 0;
   z-index: 4;
   background: var(--surface-2);
 }
@@ -508,7 +510,7 @@ button {
 }
 
 .data-grid th.pinned {
-  z-index: 5;
+  z-index: 45;
 }
 
 .data-grid .pinned-column-divider {
@@ -576,7 +578,6 @@ button {
 .column-filter-row th {
   top: var(--grid-header-height);
   height: var(--grid-filter-height);
-  z-index: 3;
 }
 
 .column-filter-input {
@@ -687,7 +688,7 @@ button {
 .data-grid th.row-number-header {
   position: sticky;
   left: 0;
-  z-index: 10;
+  z-index: 50;
 }
 
 .row-number-header .column-header {
@@ -707,7 +708,7 @@ button {
 .data-grid td.row-number-cell {
   position: sticky;
   left: 0;
-  z-index: 9;
+  z-index: 15;
 }
 
 .row-number-button {
@@ -753,7 +754,6 @@ button {
 }
 
 tr.pinned-row {
-  position: sticky;
   z-index: 2;
   background: rgba(255, 215, 0, 0.04);
 }
@@ -769,8 +769,9 @@ tr.pinned-row td {
 }
 
 tr.pinned-row .row-number-cell {
-  z-index: 10;
-  background: rgba(255, 215, 0, 0.06);
+  z-index: 20;
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* === Image preview in grid cells === */
