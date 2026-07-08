@@ -38,7 +38,13 @@
   },
   "pricing": "Free",
   "activationEvents": [
-    "onCustomEditor:databaseEditor.sqlite"
+    "onCustomEditor:databaseEditor.sqlite",
+    "onCommand:databaseEditor.copilot.chatWithDatabase",
+    "onChatParticipant:database-editor.sqlite-chat",
+    "onLanguageModelTool:databaseEditor_list_open_databases",
+    "onLanguageModelTool:databaseEditor_db_context",
+    "onLanguageModelTool:databaseEditor_query",
+    "onLanguageModelTool:databaseEditor_modify"
   ],
   "main": "./dist/extension.js",
   "extensionKind": [
@@ -55,6 +61,41 @@
   },
   "markdown": "github",
   "contributes": {
+    "configuration": {
+      "title": "SQLite Database Editor",
+      "properties": {
+        "databaseEditor.copilot.enable": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Enable Copilot chat participant and Agent Mode tools for open SQLite databases.",
+          "scope": "window",
+          "tags": [
+            "experimental"
+          ]
+        },
+        "databaseEditor.copilot.accessMode": {
+          "type": "string",
+          "default": "ro",
+          "enum": [
+            "ro",
+            "rw"
+          ],
+          "enumItemLabels": [
+            "Read Only",
+            "Read/Write"
+          ],
+          "markdownEnumDescriptions": [
+            "Copilot tools may inspect schema and run read-only queries only.",
+            "Copilot tools may also run user-confirmed INSERT, UPDATE, DELETE, and schema changes."
+          ],
+          "markdownDescription": "Controls whether Copilot tools can propose database modifications.",
+          "scope": "window",
+          "tags": [
+            "experimental"
+          ]
+        }
+      }
+    },
     "customEditors": [
       {
         "viewType": "databaseEditor.sqlite",
@@ -95,6 +136,160 @@
         "title": "Save Database",
         "icon": "$(save)",
         "enablement": "activeCustomEditorId == databaseEditor.sqlite"
+      },
+      {
+        "command": "databaseEditor.copilot.chatWithDatabase",
+        "title": "Chat with SQLite Database",
+        "category": "SQLite Database Editor",
+        "icon": "$(comment-discussion)",
+        "enablement": "activeCustomEditorId == databaseEditor.sqlite && config.databaseEditor.copilot.enable"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "name": "sqlite",
+        "description": "Helps you inspect, query, and edit open SQLite databases.",
+        "id": "database-editor.sqlite-chat",
+        "isSticky": true,
+        "disambiguation": [
+          {
+            "category": "databases",
+            "description": "The user wants help with an open SQLite database.",
+            "examples": [
+              "What tables are in this database?",
+              "Write a query for the selected table.",
+              "Why is this query slow?",
+              "Add an index for this lookup."
+            ]
+          }
+        ],
+        "when": "config.databaseEditor.copilot.enable"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "databaseEditor_list_open_databases",
+        "displayName": "List Open SQLite Databases",
+        "modelDescription": "Lists SQLite database files currently open in SQLite Database Editor. Use this first when no databaseUri is known.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "sqliteDatabases",
+        "icon": "$(database)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "tags": [
+          "sqlite",
+          "database",
+          "discovery"
+        ]
+      },
+      {
+        "name": "databaseEditor_db_context",
+        "displayName": "Get SQLite Schema Context",
+        "modelDescription": "Returns schema context for an open SQLite database: tables, views, columns, primary keys, foreign keys, indexes, triggers, CREATE SQL, and row counts. Use before writing queries or suggesting schema changes.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "sqliteSchema",
+        "icon": "$(symbol-structure)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "databaseUri": {
+              "type": "string",
+              "description": "URI returned by databaseEditor_list_open_databases. Omit to use the active database."
+            },
+            "objectName": {
+              "type": "string",
+              "description": "Optional table or view name to focus on."
+            }
+          }
+        },
+        "tags": [
+          "sqlite",
+          "database",
+          "schema"
+        ]
+      },
+      {
+        "name": "databaseEditor_query",
+        "displayName": "Query SQLite Database",
+        "modelDescription": "Runs one read-only SELECT/WITH query against an open SQLite database and returns capped JSON rows. Do not use for INSERT, UPDATE, DELETE, DDL, PRAGMA, ATTACH, VACUUM, or multi-statement scripts.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "sqliteQuery",
+        "icon": "$(play)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "databaseUri": {
+              "type": "string",
+              "description": "URI returned by databaseEditor_list_open_databases. Omit to use the active database."
+            },
+            "query": {
+              "type": "string",
+              "description": "A single read-only SQLite SELECT or safe WITH query."
+            },
+            "queryName": {
+              "type": "string",
+              "description": "Short human-readable name for this query."
+            },
+            "queryDescription": {
+              "type": "string",
+              "description": "Why this query is being run."
+            }
+          },
+          "required": [
+            "query",
+            "queryName",
+            "queryDescription"
+          ]
+        },
+        "tags": [
+          "sqlite",
+          "database",
+          "query",
+          "readonly"
+        ]
+      },
+      {
+        "name": "databaseEditor_modify",
+        "displayName": "Modify SQLite Database",
+        "modelDescription": "Runs one user-confirmed SQLite write or schema statement against an open database. Only available when databaseEditor.copilot.accessMode is read/write. Use for CREATE, ALTER, DROP, INSERT, UPDATE, DELETE after explaining the change clearly.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "sqliteModify",
+        "icon": "$(database)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "databaseUri": {
+              "type": "string",
+              "description": "URI returned by databaseEditor_list_open_databases. Omit to use the active database."
+            },
+            "statement": {
+              "type": "string",
+              "description": "A single well-formatted SQLite statement to execute."
+            },
+            "statementName": {
+              "type": "string",
+              "description": "Short human-readable name for this modification."
+            },
+            "statementDescription": {
+              "type": "string",
+              "description": "What this changes and why."
+            }
+          },
+          "required": [
+            "statement",
+            "statementName",
+            "statementDescription"
+          ]
+        },
+        "when": "config.databaseEditor.copilot.accessMode == rw",
+        "tags": [
+          "sqlite",
+          "database",
+          "schema",
+          "write"
+        ]
       }
     ],
     "menus": {
@@ -110,6 +305,11 @@
           "command": "databaseEditor.save",
           "group": "navigation@1",
           "when": "activeCustomEditorId == databaseEditor.sqlite"
+        },
+        {
+          "command": "databaseEditor.copilot.chatWithDatabase",
+          "group": "navigation@2",
+          "when": "activeCustomEditorId == databaseEditor.sqlite && config.databaseEditor.copilot.enable"
         }
       ]
     }

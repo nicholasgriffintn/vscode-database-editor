@@ -1,11 +1,25 @@
 import * as vscode from 'vscode';
 
 import { cloneData, createSnapshotEditEvent } from './custom-document-history';
+import { createSqliteChatParticipant } from './sqlite-ai/chat-participant';
+import { SqliteDocumentRegistry } from './sqlite-ai/sqlite-document-registry';
+import { loadSqlJs } from './sqlite-ai/sqljs-host';
+import { createSqliteTools } from './sqlite-ai/tools';
 
 const viewType = 'databaseEditor.sqlite';
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new SqliteEditorProvider(context);
+  const getAccessMode = () => vscode.workspace
+    .getConfiguration('databaseEditor.copilot')
+    .get<'ro' | 'rw'>('accessMode', 'ro');
+  const tools = createSqliteTools({
+    vscode,
+    registry: provider,
+    extensionUri: context.extensionUri,
+    loadSqlJs,
+    getAccessMode,
+  });
 
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(viewType, provider, {
@@ -26,6 +40,31 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('databaseEditor.save', async () => {
       await vscode.commands.executeCommand('workbench.action.files.save');
     }),
+    vscode.commands.registerCommand('databaseEditor.copilot.chatWithDatabase', async () => {
+      if (!vscode.workspace.getConfiguration('databaseEditor.copilot').get('enable', true)) {
+        await vscode.window.showWarningMessage('Copilot integration is disabled.');
+        return;
+      }
+
+      const databaseUri = provider.getActiveDocumentUri();
+      const databaseHint = databaseUri ? ` Use databaseUri "${databaseUri}".` : '';
+      await vscode.commands.executeCommand('workbench.action.chat.open', {
+        mode: 'agent',
+        query: `Use #sqliteDatabases to find the active SQLite database, then use #sqliteSchema to inspect it.${databaseHint} Summarize the schema and await further instructions.`,
+      });
+    }),
+    vscode.lm.registerTool('databaseEditor_list_open_databases', tools.listOpenDatabases),
+    vscode.lm.registerTool('databaseEditor_db_context', tools.dbContext),
+    vscode.lm.registerTool('databaseEditor_query', tools.query),
+    vscode.lm.registerTool('databaseEditor_modify', tools.modify),
+    vscode.chat.createChatParticipant(
+      'database-editor.sqlite-chat',
+      createSqliteChatParticipant({
+        vscode,
+        registry: provider,
+        getAccessMode,
+      }),
+    ),
   );
 }
 
@@ -70,7 +109,7 @@ class SqliteDocument implements vscode.CustomDocument {
 
 class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument> {
   private readonly changeEmitter = new vscode.EventEmitter<vscode.CustomDocumentEditEvent<SqliteDocument>>();
-  private readonly panels = new Map<string, Set<vscode.WebviewPanel>>();
+  private readonly registry = new SqliteDocumentRegistry<SqliteDocument>();
 
   readonly onDidChangeCustomDocument = this.changeEmitter.event;
 
@@ -96,7 +135,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     };
 
     webview.html = this.getHtml(webview);
-    this.trackPanel(document, webviewPanel);
+    this.registry.registerPanel(document, webviewPanel);
 
     webview.onDidReceiveMessage(async (message: WebviewMessage) => {
       switch (message.type) {
@@ -174,18 +213,20 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     };
   }
 
-  private trackPanel(document: SqliteDocument, panel: vscode.WebviewPanel): void {
-    const key = document.uri.toString();
-    const panels = this.panels.get(key) ?? new Set<vscode.WebviewPanel>();
-    panels.add(panel);
-    this.panels.set(key, panels);
+  listOpenDatabases() {
+    return this.registry.listOpenDatabases();
+  }
 
-    panel.onDidDispose(() => {
-      panels.delete(panel);
-      if (panels.size === 0) {
-        this.panels.delete(key);
-      }
-    });
+  resolveDocument(uri?: string): SqliteDocument | undefined {
+    return this.registry.resolveDocument(uri);
+  }
+
+  getActiveDocumentUri(): string | undefined {
+    return this.registry.getActiveDocumentUri();
+  }
+
+  async applyCopilotDatabaseChange(document: SqliteDocument, data: Uint8Array, label: string): Promise<void> {
+    await this.applyDatabaseChange(document, data, label);
   }
 
   private async postDocument(panel: vscode.WebviewPanel, document: SqliteDocument): Promise<void> {
@@ -215,12 +256,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
   }
 
   private async postToDocumentPanels(document: SqliteDocument, message: ExtensionMessage): Promise<void> {
-    const panels = this.panels.get(document.uri.toString());
-    if (!panels) {
-      return;
-    }
-
-    await Promise.all([...panels].map((panel) => panel.webview.postMessage(message)));
+    await Promise.all(this.registry.getPanels(document).map((panel) => panel.webview.postMessage(message)));
   }
 
   private async saveTextDocument(document: SqliteDocument, message: SaveTextMessage): Promise<void> {

@@ -28,6 +28,26 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 4. Click any cell to edit its value, or use the Actions column to add/delete rows.
 5. Press `Ctrl+S` (`Cmd+S` on macOS) or click the Save button to persist changes.
 
+### GitHub Copilot integration
+
+When GitHub Copilot Chat is installed, use `@sqlite` or the “Chat with SQLite Database” editor action to work with the SQLite database currently open in the editor. The integration keeps database access inside the extension host: Copilot can ask the extension for schema details, run capped read-only queries, and, when enabled, apply confirmed database changes through the same dirty/save/undo flow as manual edits.
+
+Use it for tasks such as:
+
+- **Understanding a database** — Ask what tables, views, columns, indexes, triggers, and foreign keys exist.
+- **Writing queries** — Ask Copilot to draft SQL against the real schema instead of guessing table or column names.
+- **Inspecting data** — Let Agent Mode run safe `SELECT` or `WITH` queries and return capped JSON results.
+- **Planning changes** — Ask for schema or data changes, review the generated SQL, then decide whether to apply it.
+
+The integration has two access modes:
+
+- **Read-only (`ro`)** — The default. Copilot can list open databases, inspect schema, and run one safe read-only query at a time. It cannot run `INSERT`, `UPDATE`, `DELETE`, DDL, `PRAGMA`, `ATTACH`, `VACUUM`, or multi-statement scripts.
+- **Read/write (`rw`)** — Enables the modification tool. Copilot can propose a single write or schema statement, but VS Code asks for confirmation before it runs. Confirmed changes update the custom document, mark it dirty, refresh the webview, and can be saved or undone normally.
+
+Set `databaseEditor.copilot.accessMode` to `rw` only when you want Copilot to be able to make user-confirmed changes. Set `databaseEditor.copilot.enable` to `false` to hide the `@sqlite` participant and Agent Mode tools.
+
+![GitHub Copilot Chat integration demo](docs/copilot-demo.gif)
+
 ## Requirements
 
 - VS Code 1.125.0 or later

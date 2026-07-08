@@ -17,3 +17,5 @@ pnpm-lock.yaml
 .codex/**
 .vscode/**
 IDEA.md
+.wrangler/**
+website/**
