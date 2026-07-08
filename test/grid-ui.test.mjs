@@ -5,6 +5,9 @@ import {
   getCellInteraction,
   getObjectItemInteraction,
   getPagerState,
+  getPinnedCellStyle,
+  getPinnedColumnLayout,
+  getPinnedRowOffset,
   getRowActions,
   shouldKeepKeyboardShortcutInField,
 } from '../media/grid-ui.mjs';
@@ -70,4 +73,45 @@ test('indexes and triggers are not browsable and explain why', () => {
     browsable: false,
     title: 'people_name_required is not directly browsable · defined on people',
   });
+});
+
+test('pinned columns get sequential sticky offsets after the row-number column', () => {
+  assert.deepEqual(getPinnedColumnLayout({
+    columns: ['id', 'name', 'email', 'notes'],
+    pinnedColumns: new Set(['id', 'email', 'notes']),
+    columnWidths: { id: 80, email: 240 },
+  }), {
+    id: { left: 52, width: 80, style: 'width:80px;min-width:80px;max-width:80px;left:52px;z-index:5' },
+    email: { left: 132, width: 240, style: 'width:240px;min-width:240px;max-width:240px;left:132px;z-index:5' },
+    notes: { left: 372, width: 150, style: 'width:150px;min-width:150px;max-width:150px;left:372px;z-index:5' },
+  });
+  assert.equal(getPinnedColumnLayout({
+    columns: ['created_at', 'category'],
+    pinnedColumns: new Set(['created_at', 'category']),
+    columnWidths: { created_at: 150, category: 170 },
+    rowNumberWidth: 118,
+  }).created_at.left, 118);
+});
+
+test('pinned rows stack below both sticky header rows', () => {
+  assert.equal(getPinnedRowOffset({
+    realRowIndex: 8,
+    visiblePinnedRows: [3, 8, 12],
+  }), 123);
+  assert.equal(getPinnedRowOffset({
+    realRowIndex: 9,
+    visiblePinnedRows: [3, 8, 12],
+  }), undefined);
+});
+
+test('pinned column cell style preserves horizontal offsets and sticky row top', () => {
+  assert.equal(getPinnedCellStyle({
+    columnLayout: { style: 'width:240px;min-width:240px;max-width:240px;left:132px;z-index:5' },
+    rowOffset: 123,
+    zIndex: 8,
+  }), 'width:240px;min-width:240px;max-width:240px;left:132px;top:123px;z-index:8');
+  assert.equal(getPinnedCellStyle({
+    rowOffset: 94,
+    zIndex: 7,
+  }), 'top:94px;z-index:7');
 });

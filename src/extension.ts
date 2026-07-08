@@ -241,6 +241,8 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
 
   private getHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
+    const resourceVersion = Date.now().toString(36);
+    const extensionUri = this.context.extensionUri.toString();
     const sqlJsUri = webview.asWebviewUri(vscode.Uri.joinPath(
       this.context.extensionUri,
       'media',
@@ -255,8 +257,10 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       'sqljs',
       'sql-wasm.wasm',
     ));
-    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview.mjs'));
-    const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'styles.css'));
+    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview.mjs'))
+      .with({ query: `v=${resourceVersion}` });
+    const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'styles.css'))
+      .with({ query: `v=${resourceVersion}` });
     const csp = [
       "default-src 'none'",
       `style-src ${webview.cspSource}`,
@@ -276,7 +280,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
   <title>SQLite Database Editor</title>
 </head>
 <body>
-  <div id="app" data-wasm-uri="${wasmUri}"></div>
+  <div id="app" data-wasm-uri="${wasmUri}" data-extension-uri="${escapeAttribute(extensionUri)}" data-resource-version="${resourceVersion}"></div>
   <script nonce="${nonce}" src="${sqlJsUri}"></script>
   <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
 </body>
@@ -291,6 +295,14 @@ function getNonce(): string {
     text += possible.charAt(Math.floor(Math.random() * possible.length));
   }
   return text;
+}
+
+function escapeAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 type WebviewMessage =

@@ -1,7 +1,7 @@
 {
   "name": "vscode-database-editor",
   "displayName": "Database Editor",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "NicholasGriffin",
   "license": "Apache-2.0",
   "icon": "images/database-editor-icon.png",
@@ -125,10 +125,8 @@
     "validate:local": "pnpm run vendor:sqljs:check && pnpm test && pnpm run fixture:sqlite && pnpm run vsce:package",
     "vscode:prepublish": "pnpm run package"
   },
-  "dependencies": {
-    "sql.js": "^1.14.1"
-  },
   "devDependencies": {
+    "sql.js": "^1.14.1",
     "@types/node": "^26.1.0",
     "@types/vscode": "^1.125.0",
     "@vscode/vsce": "^3.9.2",

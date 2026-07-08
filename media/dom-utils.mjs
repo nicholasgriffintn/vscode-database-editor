@@ -13,6 +13,10 @@ export function createElement(tagName, options = {}) {
     element.title = options.title;
   }
 
+  if (options.style !== undefined) {
+    element.setAttribute('style', options.style);
+  }
+
   if (options.attributes) {
     for (const [name, value] of Object.entries(options.attributes)) {
       if (value === undefined || value === null || value === false) {

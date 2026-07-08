@@ -11,6 +11,9 @@ import {
   getCellInteraction,
   getObjectItemInteraction,
   getPagerState,
+  getPinnedCellStyle,
+  getPinnedColumnLayout,
+  getPinnedRowOffset,
   getRowActions,
   shouldKeepKeyboardShortcutInField,
 } from './grid-ui.mjs';
@@ -52,6 +55,10 @@ import {
 const vscode = acquireVsCodeApi();
 const app = document.querySelector('#app');
 const wasmUri = app.dataset.wasmUri;
+console.info('[SQLite Database Editor] loaded webview', {
+  extensionUri: app.dataset.extensionUri,
+  resourceVersion: app.dataset.resourceVersion,
+});
 
 let SQL = null;
 let db = null;
@@ -478,6 +485,7 @@ async function openDatabase(name, data) {
     page = 1;
     filter = '';
     pinnedRows.clear();
+    pinnedColumns.clear();
     columnFilters = {};
     objectFilter = '';
     elements.filterInput.value = '';
@@ -704,9 +712,16 @@ function renderGrid() {
   const headerRow = createElement('tr', { className: 'column-heading-row' });
   const filterRow = createElement('tr', { className: 'column-filter-row' });
 
-  // Row # column (sticky left)
+  const pinnedColStyles = getPinnedColumnLayout({
+    columns: table.columns,
+    pinnedColumns,
+    columnWidths,
+    rowNumberWidth: columnWidths.__rowNumber || 52,
+  });
+
+  // Row # column (sticky top-left corner)
   headerRow.append(createElement('th', {
-    className: 'row-number-header pinned',
+    className: 'row-number-header',
     children: [
       createElement('div', {
         className: 'column-header',
@@ -717,7 +732,7 @@ function renderGrid() {
     ],
   }));
   filterRow.append(createElement('th', {
-    className: 'row-number-header pinned',
+    className: 'row-number-header',
     text: '',
   }));
 
@@ -726,16 +741,24 @@ function renderGrid() {
     const colWidth = columnWidths[column.name];
 
     const sortMarker = sortColumn === column.name ? (sortDirection === 'asc' ? ' \u25B2' : ' \u25BC') : '';
+    const colStyle = isPinned
+      ? pinnedColStyles[column.name].style
+      : (colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined);
     headerRow.append(createElement('th', {
       className: isPinned ? 'pinned' : '',
-      style: colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined,
+      style: colStyle,
       children: [
-        createElement('button', {
+        createElement('div', {
           className: 'column-header',
           title: buildColumnTitle(column),
-          attributes: { type: 'button', 'data-sort-column': column.name },
           children: [
-            createElement('span', { className: 'column-name', text: `${column.name}${sortMarker}` }),
+            createElement('button', {
+              className: 'column-sort-button',
+              attributes: { type: 'button', 'data-sort-column': column.name },
+              children: [
+                createElement('span', { className: 'column-name', text: `${column.name}${sortMarker}` }),
+              ],
+            }),
             createElement('span', {
               className: 'column-badges',
               children: [
@@ -756,9 +779,12 @@ function renderGrid() {
         }),
       ],
     }));
+    const filterStyle = isPinned
+      ? pinnedColStyles[column.name].style
+      : (colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined);
     filterRow.append(createElement('th', {
       className: isPinned ? 'pinned' : '',
-      style: colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined,
+      style: filterStyle,
       children: [
         createElement('input', {
           className: 'column-filter-input',
@@ -793,6 +819,13 @@ function renderGrid() {
   const columnCount = getGridColumnCount({ columnCount: table.columns.length, tableType: table.type });
   const tbody = createElement('tbody');
 
+  const visiblePinnedRows = [];
+  for (let i = 0; i < visibleRows.length; i++) {
+    if (pinnedRows.has((page - 1) * pageSize + i)) {
+      visiblePinnedRows.push((page - 1) * pageSize + i);
+    }
+  }
+
   if (visibleRows.length === 0) {
     tbody.append(createElement('tr', {
       children: [
@@ -808,21 +841,30 @@ function renderGrid() {
   for (const [rowIndex, row] of visibleRows.entries()) {
     const realRowIndex = (page - 1) * pageSize + rowIndex;
     const isRowPinned = pinnedRows.has(realRowIndex);
+    const pinnedRowOffset = getPinnedRowOffset({ realRowIndex, visiblePinnedRows });
     const tr = createElement('tr', {
       className: [
         selectedRow === rowIndex ? 'selected-row' : '',
         isRowPinned ? 'pinned-row' : '',
       ].filter(Boolean).join(' '),
+      style: pinnedRowOffset !== undefined ? `top:${pinnedRowOffset}px` : undefined,
       attributes: { 'data-row': String(rowIndex) },
     });
 
-    // Row # cell (sticky left)
+    // Row # cell (sticky top-left corner)
     const rowNumCell = createElement('td', {
-      className: 'row-number-cell pinned',
+      className: [
+        'row-number-cell',
+        isRowPinned ? 'pinned-row-cell' : '',
+      ].filter(Boolean).join(' '),
+      style: getPinnedCellStyle({
+        rowOffset: pinnedRowOffset,
+        zIndex: isRowPinned ? 10 : undefined,
+      }),
       children: [
         createElement('button', {
           className: 'row-number-button',
-          attributes: { type: 'button', 'data-row-number': String(rowIndex) },
+          attributes: { type: 'button', 'data-pin-row': String(rowIndex) },
           children: [
             createElement('span', { className: 'row-number-text', text: String(realRowIndex + 1) }),
             createElement('span', {
@@ -885,14 +927,23 @@ function renderGrid() {
             }),
           ];
 
+      const columnLayout = isPinned
+        ? pinnedColStyles[column.name]
+        : (colWidth ? { style: `width:${colWidth}px;min-width:${colWidth}px;max-width:${colWidth}px` } : undefined);
+      const cellStyle = getPinnedCellStyle({
+        columnLayout,
+        rowOffset: pinnedRowOffset,
+        zIndex: isRowPinned && isPinned ? 9 : (isRowPinned ? 8 : (isPinned ? 5 : undefined)),
+      });
       const cell = createElement('td', {
         className: [
           value === null || value === undefined ? 'null-cell' : '',
           interaction.disabled ? '' : 'editable-cell',
           isPinned ? 'pinned' : '',
+          isRowPinned ? 'pinned-row-cell' : '',
           isImage ? 'blob-image-cell' : '',
         ].filter(Boolean).join(' '),
-        style: colWidth ? `width:${colWidth}px;min-width:${colWidth}px;max-width:${colWidth}px` : undefined,
+        style: cellStyle,
         children: cellChildren,
       });
       tr.append(cell);
@@ -901,7 +952,14 @@ function renderGrid() {
     const rowActions = getRowActions({ tableType: table.type, rowIndex });
     if (rowActions.length > 0) {
       tr.append(createElement('td', {
-        className: 'row-actions-cell',
+        className: [
+          'row-actions-cell',
+          isRowPinned ? 'pinned-row-cell' : '',
+        ].filter(Boolean).join(' '),
+        style: getPinnedCellStyle({
+          rowOffset: pinnedRowOffset,
+          zIndex: isRowPinned ? 8 : undefined,
+        }),
         children: [
           createElement('div', {
             className: 'row-action-group',
@@ -1015,6 +1073,28 @@ function buildColumnTitle(column) {
   ].filter(Boolean).join(' \u00B7 ');
 }
 
+function rememberRenderedColumnWidths() {
+  const gridEl = elements.grid?.querySelector?.('.data-grid');
+  if (!gridEl) {
+    return;
+  }
+
+  const rowNumberHeader = gridEl.querySelector('.column-heading-row .row-number-header');
+  const rowNumberWidth = Math.round(rowNumberHeader?.offsetWidth ?? 0);
+  if (rowNumberWidth > 0) {
+    columnWidths.__rowNumber = rowNumberWidth;
+  }
+
+  for (const handle of gridEl.querySelectorAll('[data-resize-column]')) {
+    const columnName = handle.dataset.resizeColumn;
+    const headerCell = handle.closest('th');
+    const width = Math.round(headerCell?.offsetWidth ?? 0);
+    if (columnName && width > 0) {
+      columnWidths[columnName] = width;
+    }
+  }
+}
+
 async function handleClick(event) {
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action) {
@@ -1024,6 +1104,7 @@ async function handleClick(event) {
 
   const pinButton = event.target.closest('[data-pin-column]');
   if (pinButton) {
+    rememberRenderedColumnWidths();
     const columnName = pinButton.dataset.pinColumn;
     if (pinnedColumns.has(columnName)) {
       pinnedColumns.delete(columnName);
@@ -1062,6 +1143,7 @@ async function handleClick(event) {
     sortColumn = null;
     sortDirection = 'asc';
     pinnedRows.clear();
+    pinnedColumns.clear();
     renderSidebar();
     renderSchema();
     await refreshRows();

@@ -67,6 +67,69 @@ export function shouldKeepKeyboardShortcutInField({ key, metaKey, ctrlKey, targe
   return new Set(['z', 'y', 'a', 'x', 'c', 'v']).has(String(key).toLowerCase());
 }
 
+export function getPinnedColumnLayout({
+  columns,
+  pinnedColumns,
+  columnWidths = {},
+  rowNumberWidth = 52,
+  fallbackWidth = 150,
+}) {
+  let left = rowNumberWidth;
+  const layout = {};
+
+  for (const column of columns) {
+    const columnName = typeof column === 'string' ? column : column.name;
+    if (!pinnedColumns.has(columnName)) {
+      continue;
+    }
+
+    const configuredWidth = Number(columnWidths[columnName]);
+    const width = Number.isFinite(configuredWidth) && configuredWidth > 0
+      ? configuredWidth
+      : fallbackWidth;
+    layout[columnName] = {
+      left,
+      width,
+      style: `width:${width}px;min-width:${width}px;max-width:${width}px;left:${left}px;z-index:5`,
+    };
+    left += width;
+  }
+
+  return layout;
+}
+
+export function getPinnedRowOffset({
+  realRowIndex,
+  visiblePinnedRows,
+  headerHeight = 56,
+  filterHeight = 38,
+  rowHeight = 29,
+}) {
+  const pinnedIndex = visiblePinnedRows.indexOf(realRowIndex);
+  if (pinnedIndex === -1) {
+    return undefined;
+  }
+
+  return headerHeight + filterHeight + (pinnedIndex * rowHeight);
+}
+
+export function getPinnedCellStyle({ columnLayout, rowOffset, zIndex }) {
+  const declarations = [];
+  if (columnLayout?.style) {
+    declarations.push(...columnLayout.style
+      .split(';')
+      .map((part) => part.trim())
+      .filter((part) => part && !part.startsWith('z-index:')));
+  }
+  if (rowOffset !== undefined) {
+    declarations.push(`top:${rowOffset}px`);
+  }
+  if (zIndex !== undefined) {
+    declarations.push(`z-index:${zIndex}`);
+  }
+  return declarations.length > 0 ? declarations.join(';') : undefined;
+}
+
 export function getObjectItemInteraction({ objectType, objectName, tableName }) {
   const isBrowsable = objectType === 'table' || objectType === 'view';
   if (isBrowsable) {

@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      sql.js:
-        specifier: ^1.14.1
-        version: 1.14.1
     devDependencies:
       '@types/node':
         specifier: ^26.1.0
@@ -21,6 +17,9 @@ importers:
       '@vscode/vsce':
         specifier: ^3.9.2
         version: 3.9.2
+      sql.js:
+        specifier: ^1.14.1
+        version: 1.14.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

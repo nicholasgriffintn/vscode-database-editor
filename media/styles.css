@@ -119,7 +119,9 @@ button {
 .icon-button,
 .object-item,
 .column-header,
+.column-sort-button,
 .cell-button {
+  appearance: none;
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -215,6 +217,7 @@ button {
 .content {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -378,6 +381,11 @@ button {
   vertical-align: top;
 }
 
+.data-grid td {
+  max-width: min(360px, 30vw);
+  overflow: hidden;
+}
+
 .data-grid th {
   position: sticky;
   z-index: 3;
@@ -385,9 +393,22 @@ button {
   box-shadow: inset 0 -1px 0 var(--hairline);
 }
 
+.data-grid .row-number-header {
+  z-index: 10;
+}
+
+.data-grid td.row-number-cell {
+  z-index: 9;
+}
+
 .column-heading-row th {
   top: 0;
   height: var(--grid-header-height);
+}
+
+.column-filter-row th {
+  top: var(--grid-header-height);
+  height: var(--grid-filter-height);
 }
 
 .column-header {
@@ -409,6 +430,24 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.column-sort-button {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 40px;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.column-sort-button .column-name {
+  min-width: 0;
 }
 
 .column-badges {
@@ -466,6 +505,10 @@ button {
 
 .data-grid td.pinned {
   background: var(--surface-0);
+}
+
+.data-grid th.pinned {
+  z-index: 5;
 }
 
 .data-grid .pinned-column-divider {
@@ -633,13 +676,18 @@ button {
   font-style: italic;
 }
 
-/* === Row # column (sticky left) === */
+/* === Row # column (sticky top-left corner) === */
 .row-number-header {
   width: 52px;
   min-width: 52px;
   max-width: 52px;
-  z-index: 5;
   background: var(--surface-2);
+}
+
+.data-grid th.row-number-header {
+  position: sticky;
+  left: 0;
+  z-index: 10;
 }
 
 .row-number-header .column-header {
@@ -653,8 +701,13 @@ button {
   min-width: 52px;
   max-width: 52px;
   padding: 0;
-  z-index: 4;
   background: var(--surface-0);
+}
+
+.data-grid td.row-number-cell {
+  position: sticky;
+  left: 0;
+  z-index: 9;
 }
 
 .row-number-button {
@@ -700,10 +753,23 @@ button {
 }
 
 tr.pinned-row {
+  position: sticky;
+  z-index: 2;
   background: rgba(255, 215, 0, 0.04);
 }
 
+tr.pinned-row td {
+  background: var(--surface-0);
+  overflow: visible;
+}
+
+.data-grid td.pinned-row-cell {
+  position: sticky;
+  background: var(--surface-0);
+}
+
 tr.pinned-row .row-number-cell {
+  z-index: 10;
   background: rgba(255, 215, 0, 0.06);
 }
 
@@ -866,6 +932,7 @@ tr.pinned-row .row-number-cell {
   color: var(--text-primary);
   background: var(--surface-1);
   box-shadow: 0 20px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.035);
+  overflow: hidden;
 }
 
 .row-dialog::backdrop,
@@ -874,13 +941,15 @@ tr.pinned-row .row-number-cell {
 }
 
 .row-dialog-form {
-  display: grid;
-  max-height: calc(100vh - 80px);
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: inherit;
   gap: 0;
 }
 
 .row-dialog-header {
+  flex-shrink: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
@@ -918,6 +987,7 @@ tr.pinned-row .row-number-cell {
 
 .row-fields {
   display: grid;
+  flex: 1;
   min-height: 0;
   overflow: auto;
   padding: 8px 0;
@@ -952,8 +1022,8 @@ tr.pinned-row .row-number-cell {
 
 .row-field-input {
   width: 100%;
-  min-height: 34px;
-  padding: 6px 9px;
+  min-height: 56px;
+  padding: 7px 9px;
   resize: vertical;
   font-family: var(--vscode-editor-font-family), monospace;
 }
@@ -1073,6 +1143,7 @@ tr.pinned-row .row-number-cell {
 }
 
 .dialog-actions {
+  flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
