@@ -163,7 +163,7 @@ for (const asset of assets) {
 }
 assetStmt.free();
 
-for (let index = 1; index <= 350; index += 1) {
+for (let index = 1; index <= 3000; index += 1) {
   db.run(
     'INSERT INTO event_log (category, occurred_at, duration_ms, people_id, notes) VALUES (?, ?, ?, ?, ?)',
     [
@@ -206,7 +206,7 @@ db.run(`
   )
 `);
 
-for (let index = 1; index <= 25; index++) {
+for (let index = 1; index <= 500; index++) {
   db.run(
     `INSERT INTO wide_dashboard (
       name, owner, region, environment, alert_threshold,

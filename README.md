@@ -4,7 +4,7 @@
 
 A fast, lightweight SQLite database editor built directly into VS Code. Browse tables, edit data, run queries, and manage your database schema — all without leaving the editor.
 
-![SQLite Database Editor](images/database-editor-icon.png)
+![SQLite Database Editor VS Code demo](docs/demo.gif)
 
 ## Features
 
