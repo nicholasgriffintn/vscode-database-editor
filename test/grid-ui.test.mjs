@@ -3,19 +3,22 @@ import test from 'node:test';
 
 import {
   getCellInteraction,
+  getCellClipboardText,
+  getGridColumnStyle,
   getObjectItemInteraction,
   getPagerState,
   getPinnedCellStyle,
   getPinnedColumnLayout,
   getPinnedRowOffset,
   getRowActions,
+  getTextEditingShortcutAction,
   shouldKeepKeyboardShortcutInField,
 } from '../media/grid-ui.mjs';
 
-test('editable table cells open the editor on single click', () => {
+test('editable table cells select first, then expose double-click edit and copy guidance', () => {
   assert.deepEqual(getCellInteraction({ tableType: 'table', value: 'Ada' }), {
     disabled: false,
-    title: 'Open row details',
+    title: 'Click to select · double-click to edit · Ctrl/Cmd+C to copy',
   });
 });
 
@@ -28,6 +31,13 @@ test('views and blob cells do not expose inline editing', () => {
     disabled: true,
     title: 'BLOB values cannot be edited inline',
   });
+});
+
+test('cell clipboard text preserves editable values and describes non-text values', () => {
+  assert.equal(getCellClipboardText('Ada'), 'Ada');
+  assert.equal(getCellClipboardText(42), '42');
+  assert.equal(getCellClipboardText(null), '');
+  assert.equal(getCellClipboardText(new Uint8Array([1, 2, 3])), '[BLOB 3 bytes]');
 });
 
 test('row actions are per-row and table-only', () => {
@@ -44,6 +54,18 @@ test('pager state belongs to the bottom-right grid footer', () => {
     canGoPrevious: true,
     canGoNext: true,
   });
+});
+
+test('text editing shortcuts map to explicit input actions across webview fields', () => {
+  assert.equal(getTextEditingShortcutAction({ key: 'a', metaKey: true, targetTagName: 'input' }), 'selectAll');
+  assert.equal(getTextEditingShortcutAction({ key: 'c', ctrlKey: true, targetTagName: 'textarea' }), 'copy');
+  assert.equal(getTextEditingShortcutAction({ key: 'x', metaKey: true, targetTagName: 'input' }), 'cut');
+  assert.equal(getTextEditingShortcutAction({ key: 'v', metaKey: true, targetTagName: 'textarea' }), 'paste');
+  assert.equal(getTextEditingShortcutAction({ key: 'z', metaKey: true, shiftKey: false, targetTagName: 'textarea' }), 'nativeUndo');
+  assert.equal(getTextEditingShortcutAction({ key: 'z', metaKey: true, shiftKey: true, targetTagName: 'textarea' }), 'nativeRedo');
+  assert.equal(getTextEditingShortcutAction({ key: 'y', ctrlKey: true, targetTagName: 'input' }), 'nativeRedo');
+  assert.equal(getTextEditingShortcutAction({ key: 's', metaKey: true, targetTagName: 'input' }), null);
+  assert.equal(getTextEditingShortcutAction({ key: 'v', metaKey: true, targetTagName: 'button' }), null);
 });
 
 test('text editing shortcuts stay inside row detail fields', () => {
@@ -73,6 +95,12 @@ test('indexes and triggers are not browsable and explain why', () => {
     browsable: false,
     title: 'people_name_required is not directly browsable · defined on people',
   });
+});
+
+test('unresized grid columns carry a max-width cap and resized columns override it', () => {
+  assert.equal(getGridColumnStyle(), 'max-width:min(360px, 30vw)');
+  assert.equal(getGridColumnStyle({ columnWidth: 420 }), 'width:420px;min-width:420px;max-width:420px');
+  assert.equal(getGridColumnStyle({ columnWidth: 0 }), 'max-width:min(360px, 30vw)');
 });
 
 test('pinned columns get sequential sticky offsets after the row-number column', () => {

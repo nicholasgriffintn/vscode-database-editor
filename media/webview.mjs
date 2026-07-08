@@ -9,12 +9,15 @@ import {
 import { safeFileName } from './file-utils.mjs';
 import {
   getCellInteraction,
+  getCellClipboardText,
+  getGridColumnStyle,
   getObjectItemInteraction,
   getPagerState,
   getPinnedCellStyle,
   getPinnedColumnLayout,
   getPinnedRowOffset,
   getRowActions,
+  getTextEditingShortcutAction,
   shouldKeepKeyboardShortcutInField,
 } from './grid-ui.mjs';
 import {
@@ -76,6 +79,7 @@ let pageSize = 100;
 let totalRows = 0;
 let visibleRows = [];
 let selectedRow = null;
+let selectedCell = null;
 let querySql = 'SELECT name, type FROM sqlite_schema ORDER BY type, name;';
 let queryResults = [];
 let schemaObjects = [];
@@ -86,6 +90,8 @@ let columnWidths = {};
 let pinnedRows = new Set();
 /** @type {string[]} */
 let gridBlobUrls = [];
+let clipboardRequestId = 0;
+const pendingClipboardReads = new Map();
 
 function getTypeIcon(affinity) {
   switch (affinity) {
@@ -137,6 +143,12 @@ window.addEventListener('message', async (event) => {
     await openDatabase(message.name, message.data);
   } else if (message.type === 'databaseSaved') {
     handleDatabaseSaved();
+  } else if (message.type === 'clipboardText') {
+    const pending = pendingClipboardReads.get(message.requestId);
+    if (pending) {
+      pendingClipboardReads.delete(message.requestId);
+      pending.resolve(message.text ?? '');
+    }
   }
 });
 
@@ -357,12 +369,7 @@ function buildShell() {
   queryInput.addEventListener('input', () => {
     querySql = queryInput.value;
   });
-  window.addEventListener('keydown', (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      requestSave();
-    }
-  });
+  window.addEventListener('keydown', handleGlobalKeyDown, true);
 
   let resizeData = null;
   grid.addEventListener('mousedown', (event) => {
@@ -444,6 +451,141 @@ function buildShell() {
   };
 }
 
+function handleGlobalKeyDown(event) {
+  const textAction = getTextEditingShortcutAction({
+    key: event.key,
+    metaKey: event.metaKey,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    targetTagName: event.target?.tagName,
+  });
+  if (textAction) {
+    event.stopPropagation();
+    if (textAction === 'nativeUndo' || textAction === 'nativeRedo') {
+      return;
+    }
+    event.preventDefault();
+    void applyTextEditingShortcut(event.target, textAction);
+    return;
+  }
+
+  if (!event.metaKey && !event.ctrlKey) {
+    return;
+  }
+
+  const key = event.key.toLowerCase();
+  if (key === 'c' && !document.querySelector('dialog[open]')) {
+    const selectedText = window.getSelection?.().toString() ?? '';
+    if (!selectedText) {
+      const targetCell = event.target.closest?.('[data-grid-cell-row]');
+      const rowIndex = targetCell ? Number(targetCell.dataset.gridCellRow) : selectedCell?.rowIndex;
+      const columnName = targetCell?.dataset.gridCellColumn ?? selectedCell?.columnName;
+      if (Number.isInteger(rowIndex) && columnName) {
+        event.preventDefault();
+        event.stopPropagation();
+        selectGridCell(rowIndex, columnName);
+        void copyGridCell(rowIndex, columnName);
+        return;
+      }
+    }
+  }
+
+  if (key === 'z' && !document.querySelector('dialog[open]')) {
+    event.preventDefault();
+    event.stopPropagation();
+    vscode.postMessage({ type: event.shiftKey ? 'redo' : 'undo' });
+    return;
+  }
+
+  if (key === 'y' && !document.querySelector('dialog[open]')) {
+    event.preventDefault();
+    event.stopPropagation();
+    vscode.postMessage({ type: 'redo' });
+    return;
+  }
+
+  if (key === 's') {
+    if (document.querySelector('dialog[open]')) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    requestSave();
+  }
+}
+
+function isTextControl(target) {
+  const tag = String(target?.tagName ?? '').toLowerCase();
+  return (tag === 'input' || tag === 'textarea') && typeof target.value === 'string';
+}
+
+function replaceTextControlSelection(target, text) {
+  if (!isTextControl(target) || target.readOnly || target.disabled) {
+    return;
+  }
+
+  if (document.activeElement === target && document.execCommand('insertText', false, text)) {
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    return;
+  }
+
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? start;
+  if (typeof target.setRangeText === 'function') {
+    target.setRangeText(text, start, end, 'end');
+  } else {
+    target.value = `${target.value.slice(0, start)}${text}${target.value.slice(end)}`;
+    const nextCursor = start + text.length;
+    target.setSelectionRange?.(nextCursor, nextCursor);
+  }
+  target.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function deleteTextControlSelection(target) {
+  if (!isTextControl(target) || target.readOnly || target.disabled) {
+    return;
+  }
+
+  if (document.activeElement === target && document.execCommand('delete')) {
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    return;
+  }
+
+  replaceTextControlSelection(target, '');
+}
+
+function getSelectedTextInControl(target) {
+  if (!isTextControl(target)) {
+    return '';
+  }
+  const start = target.selectionStart ?? 0;
+  const end = target.selectionEnd ?? start;
+  return target.value.slice(start, end);
+}
+
+async function applyTextEditingShortcut(target, action) {
+  if (!isTextControl(target)) {
+    return;
+  }
+
+  switch (action) {
+    case 'selectAll':
+      target.select?.();
+      break;
+    case 'copy':
+      await writeClipboardText(getSelectedTextInControl(target));
+      break;
+    case 'cut': {
+      await writeClipboardText(getSelectedTextInControl(target));
+      deleteTextControlSelection(target);
+      break;
+    }
+    case 'paste':
+      replaceTextControlSelection(target, await readClipboardText());
+      break;
+  }
+}
+
 async function handleInput(event) {
   const columnFilter = event.target.closest?.('[data-column-filter]');
   if (columnFilter) {
@@ -482,6 +624,7 @@ async function openDatabase(name, data) {
     databaseName = name;
     elements.title.textContent = name;
     selectedRow = null;
+    selectedCell = null;
     page = 1;
     filter = '';
     pinnedRows.clear();
@@ -539,6 +682,7 @@ async function refreshTables() {
 async function refreshRows() {
   const table = getActiveTable();
   selectedRow = null;
+  selectedCell = null;
 
   if (!table) {
     totalRows = 0;
@@ -743,7 +887,7 @@ function renderGrid() {
     const sortMarker = sortColumn === column.name ? (sortDirection === 'asc' ? ' \u25B2' : ' \u25BC') : '';
     const colStyle = isPinned
       ? getPinnedCellStyle({ columnLayout: pinnedColStyles[column.name], zIndex: 45 })
-      : (colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined);
+      : getGridColumnStyle({ columnWidth: colWidth });
     headerRow.append(createElement('th', {
       className: isPinned ? 'pinned' : '',
       style: colStyle,
@@ -781,7 +925,7 @@ function renderGrid() {
     }));
     const filterStyle = isPinned
       ? getPinnedCellStyle({ columnLayout: pinnedColStyles[column.name], zIndex: 42 })
-      : (colWidth ? `width:${colWidth}px;min-width:${colWidth}px` : undefined);
+      : getGridColumnStyle({ columnWidth: colWidth });
     filterRow.append(createElement('th', {
       className: isPinned ? 'pinned' : '',
       style: filterStyle,
@@ -928,7 +1072,7 @@ function renderGrid() {
 
       const columnLayout = isPinned
         ? pinnedColStyles[column.name]
-        : (colWidth ? { style: `width:${colWidth}px;min-width:${colWidth}px;max-width:${colWidth}px` } : undefined);
+        : { style: getGridColumnStyle({ columnWidth: colWidth }) };
       const cellStyle = getPinnedCellStyle({
         columnLayout,
         rowOffset: isRowPinned ? pinnedRowOffset : undefined,
@@ -941,8 +1085,13 @@ function renderGrid() {
           isPinned ? 'pinned' : '',
           isRowPinned ? 'pinned-row-cell' : '',
           isImage ? 'blob-image-cell' : '',
+          selectedCell?.rowIndex === rowIndex && selectedCell?.columnName === column.name ? 'selected-cell' : '',
         ].filter(Boolean).join(' '),
         style: cellStyle,
+        attributes: {
+          'data-grid-cell-row': String(rowIndex),
+          'data-grid-cell-column': column.name,
+        },
         children: cellChildren,
       });
       tr.append(cell);
@@ -1094,6 +1243,58 @@ function rememberRenderedColumnWidths() {
   }
 }
 
+function selectGridRow(rowIndex) {
+  selectedRow = rowIndex;
+  selectedCell = null;
+  const gridEl = elements.grid.querySelector('.data-grid');
+  gridEl?.querySelectorAll('.selected-row').forEach((row) => row.classList.remove('selected-row'));
+  gridEl?.querySelectorAll('.selected-cell').forEach((cell) => cell.classList.remove('selected-cell'));
+  gridEl?.querySelector(`tr[data-row="${CSS.escape(String(rowIndex))}"]`)?.classList.add('selected-row');
+}
+
+function selectGridCell(rowIndex, columnName) {
+  selectedRow = rowIndex;
+  selectedCell = { rowIndex, columnName };
+  const gridEl = elements.grid.querySelector('.data-grid');
+  gridEl?.querySelectorAll('.selected-row').forEach((row) => row.classList.remove('selected-row'));
+  gridEl?.querySelectorAll('.selected-cell').forEach((cell) => cell.classList.remove('selected-cell'));
+  const row = gridEl?.querySelector(`tr[data-row="${CSS.escape(String(rowIndex))}"]`);
+  row?.classList.add('selected-row');
+  row?.querySelector(`[data-grid-cell-column="${CSS.escape(columnName)}"]`)?.classList.add('selected-cell');
+}
+
+async function copyGridCell(rowIndex, columnName) {
+  const row = visibleRows[rowIndex];
+  if (!row) {
+    return;
+  }
+
+  const value = row.values[columnName];
+  await writeClipboardText(getCellClipboardText(value));
+  elements.status.textContent = `Copied ${columnName}`;
+}
+
+async function writeClipboardText(text) {
+  vscode.postMessage({ type: 'clipboardWrite', text });
+}
+
+async function readClipboardText() {
+  const requestId = String(++clipboardRequestId);
+  vscode.postMessage({ type: 'clipboardRead', requestId });
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      pendingClipboardReads.delete(requestId);
+      resolve('');
+    }, 2000);
+    pendingClipboardReads.set(requestId, {
+      resolve: (text) => {
+        window.clearTimeout(timeout);
+        resolve(text);
+      },
+    });
+  });
+}
+
 async function handleClick(event) {
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action) {
@@ -1123,7 +1324,7 @@ async function handleClick(event) {
     } else {
       pinnedRows.add(realRowIndex);
     }
-    selectedRow = rowIndex;
+    selectGridRow(rowIndex);
     renderGrid();
     return;
   }
@@ -1158,30 +1359,31 @@ async function handleClick(event) {
     return;
   }
 
-  const cellButton = event.target.closest('[data-cell-row]');
-  if (cellButton) {
-    selectedRow = Number(cellButton.dataset.cellRow);
-    if (!cellButton.disabled) {
-      showRowDetails(selectedRow, cellButton.dataset.cellColumn);
-    }
+  const gridCell = event.target.closest('[data-grid-cell-row]');
+  if (gridCell) {
+    selectGridCell(Number(gridCell.dataset.gridCellRow), gridCell.dataset.gridCellColumn);
     return;
   }
 
   const row = event.target.closest('tr[data-row]');
   if (row) {
-    selectedRow = Number(row.dataset.row);
-    renderGrid();
+    selectGridRow(Number(row.dataset.row));
     return;
   }
 }
 
 function handleDoubleClick(event) {
-  const cellButton = event.target.closest('[data-cell-row]');
-  if (!cellButton || cellButton.disabled) {
+  const gridCell = event.target.closest('[data-grid-cell-row]');
+  if (!gridCell) {
     return;
   }
 
-  showRowDetails(Number(cellButton.dataset.cellRow), cellButton.dataset.cellColumn);
+  const cellButton = gridCell.querySelector('[data-cell-row]');
+  if (cellButton?.disabled) {
+    return;
+  }
+
+  showRowDetails(Number(gridCell.dataset.gridCellRow), gridCell.dataset.gridCellColumn);
 }
 
 async function runAction(action, sourceElement = null) {
@@ -1435,6 +1637,7 @@ function showRowDetails(rowIndex, initialColumnName = null) {
       key: event.key,
       metaKey: event.metaKey,
       ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
       targetTagName: event.target?.tagName,
     })) {
       event.stopPropagation();

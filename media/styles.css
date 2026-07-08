@@ -48,6 +48,15 @@ body {
   font: var(--vscode-font-size) / 1.45 var(--vscode-font-family);
 }
 
+.clipboard-fallback {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
 #app {
   display: flex;
   flex-direction: column;
@@ -369,7 +378,8 @@ button {
 }
 
 .data-grid {
-  min-width: 100%;
+  --grid-column-max-width: min(360px, 30vw);
+  width: max-content;
   border-spacing: 0;
 }
 
@@ -381,8 +391,9 @@ button {
   vertical-align: top;
 }
 
-.data-grid td {
-  max-width: min(360px, 30vw);
+.data-grid th:not(.row-number-header),
+.data-grid td:not(.row-number-cell):not(.row-actions-cell) {
+  max-width: var(--grid-column-max-width);
   overflow: hidden;
 }
 
@@ -419,6 +430,7 @@ button {
   align-items: center;
   gap: 4px;
   width: 100%;
+  max-width: inherit;
   min-height: var(--grid-header-height);
   padding: 8px 9px;
   color: var(--text-primary);
@@ -582,6 +594,7 @@ button {
 
 .column-filter-input {
   width: calc(100% - 8px);
+  max-width: calc(var(--grid-column-max-width) - 8px);
   margin: 4px;
 }
 
@@ -652,6 +665,7 @@ button {
 
 .cell-button {
   width: 100%;
+  max-width: inherit;
   min-height: 29px;
   padding: 6px 9px;
   overflow: hidden;
@@ -663,8 +677,14 @@ button {
 }
 
 .cell-button:hover,
-.selected-row .cell-button {
+.selected-row .cell-button,
+.selected-cell .cell-button {
   background: var(--row-hover);
+}
+
+.selected-cell .cell-button {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
 }
 
 .editable-cell .cell-button:hover {

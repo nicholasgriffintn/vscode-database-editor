@@ -15,7 +15,7 @@ export function getCellInteraction({ tableType, value }) {
 
   return {
     disabled: false,
-    title: 'Open row details',
+    title: 'Click to select · double-click to edit · Ctrl/Cmd+C to copy',
   };
 }
 
@@ -54,17 +54,46 @@ export function getPagerState({ page, pageSize, filteredRows, totalRows }) {
   };
 }
 
-export function shouldKeepKeyboardShortcutInField({ key, metaKey, ctrlKey, targetTagName }) {
+export function shouldKeepKeyboardShortcutInField({ key, metaKey, ctrlKey, shiftKey, targetTagName }) {
+  return getTextEditingShortcutAction({ key, metaKey, ctrlKey, shiftKey, targetTagName }) !== null;
+}
+
+export function getTextEditingShortcutAction({ key, metaKey = false, ctrlKey = false, shiftKey = false, targetTagName }) {
   if (!metaKey && !ctrlKey) {
-    return false;
+    return null;
   }
 
   const tag = String(targetTagName ?? '').toLowerCase();
   if (tag !== 'input' && tag !== 'textarea') {
-    return false;
+    return null;
   }
 
-  return new Set(['z', 'y', 'a', 'x', 'c', 'v']).has(String(key).toLowerCase());
+  switch (String(key).toLowerCase()) {
+    case 'a':
+      return 'selectAll';
+    case 'c':
+      return 'copy';
+    case 'x':
+      return 'cut';
+    case 'v':
+      return 'paste';
+    case 'z':
+      return shiftKey ? 'nativeRedo' : 'nativeUndo';
+    case 'y':
+      return 'nativeRedo';
+    default:
+      return null;
+  }
+}
+
+export function getCellClipboardText(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (value instanceof Uint8Array) {
+    return `[BLOB ${value.length} bytes]`;
+  }
+  return String(value);
 }
 
 export function getPinnedColumnLayout({
@@ -96,6 +125,17 @@ export function getPinnedColumnLayout({
   }
 
   return layout;
+}
+
+export const DEFAULT_GRID_COLUMN_MAX_WIDTH = 'min(360px, 30vw)';
+
+export function getGridColumnStyle({ columnWidth, maxWidth = DEFAULT_GRID_COLUMN_MAX_WIDTH } = {}) {
+  const configuredWidth = Number(columnWidth);
+  if (Number.isFinite(configuredWidth) && configuredWidth > 0) {
+    return `width:${configuredWidth}px;min-width:${configuredWidth}px;max-width:${configuredWidth}px`;
+  }
+
+  return `max-width:${maxWidth}`;
 }
 
 export function getPinnedRowOffset({

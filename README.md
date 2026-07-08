@@ -1,8 +1,8 @@
 # Database Editor for VS Code
 
-[![Visual Studio Marketplace](https://img.shields.io/visual-studio-marketplace/v/NicholasGriffin.vscode-database-editor?label=Marketplace&color=7aa2f7)](https://marketplace.visualstudio.com/items?itemName=NicholasGriffin.vscode-database-editor)
-
 A fast, lightweight SQLite database editor built directly into VS Code. Browse tables, edit data, run queries, and manage your database schema — all without leaving the editor.
+
+[![Visual Studio Marketplace](https://img.shields.io/badge/marketplace-NicholasGriffin.vscode--database--editor-blue)](https://marketplace.visualstudio.com/items?itemName=NicholasGriffin.vscode-database-editor)
 
 ![SQLite Database Editor VS Code demo](docs/demo.gif)
 

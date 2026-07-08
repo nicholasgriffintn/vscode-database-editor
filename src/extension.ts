@@ -118,6 +118,22 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
         case 'saveBinary':
           await this.saveBinaryDocument(document, message);
           break;
+        case 'clipboardWrite':
+          await vscode.env.clipboard.writeText(message.text);
+          break;
+        case 'clipboardRead':
+          await webview.postMessage({
+            type: 'clipboardText',
+            requestId: message.requestId,
+            text: await vscode.env.clipboard.readText(),
+          });
+          break;
+        case 'undo':
+          await vscode.commands.executeCommand('undo');
+          break;
+        case 'redo':
+          await vscode.commands.executeCommand('redo');
+          break;
       }
     });
   }
@@ -310,12 +326,17 @@ type WebviewMessage =
   | { type: 'databaseChanged'; data: ArrayBuffer; label?: string }
   | { type: 'requestSave' }
   | { type: 'error'; message: string }
+  | { type: 'clipboardWrite'; text: string }
+  | { type: 'clipboardRead'; requestId: string }
+  | { type: 'undo' }
+  | { type: 'redo' }
   | SaveTextMessage
   | SaveBinaryMessage;
 
 type ExtensionMessage =
   | { type: 'loadDatabase'; name: string; data: ArrayBuffer }
-  | { type: 'databaseSaved' };
+  | { type: 'databaseSaved' }
+  | { type: 'clipboardText'; requestId: string; text: string };
 
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(data.byteLength);
