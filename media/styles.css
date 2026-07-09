@@ -169,18 +169,27 @@ button {
 }
 
 .object-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px;
   border-bottom: 1px solid var(--hairline);
 }
 
 .object-search {
-  width: 100%;
+  flex: 1;
+  width: auto;
+  min-width: 0;
   min-height: 26px;
   padding: 4px 8px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
   color: var(--vscode-input-foreground);
   background: var(--surface-3);
+}
+
+.object-refresh-button {
+  flex: 0 0 auto;
 }
 
 .sidebar-heading {

@@ -10,10 +10,37 @@ import {
   getPinnedCellStyle,
   getPinnedColumnLayout,
   getPinnedRowOffset,
+  getRefreshButtonState,
   getRowActions,
   getTextEditingShortcutAction,
   shouldKeepKeyboardShortcutInField,
 } from '../media/grid-ui.mjs';
+
+test('database object refresh is available whenever a database is open', () => {
+  assert.deepEqual(getRefreshButtonState({
+    target: 'objects',
+    hasDatabase: false,
+    hasActiveTable: false,
+  }), { disabled: true });
+  assert.deepEqual(getRefreshButtonState({
+    target: 'objects',
+    hasDatabase: true,
+    hasActiveTable: false,
+  }), { disabled: false });
+});
+
+test('table data refresh is available only when a table or view is selected', () => {
+  assert.deepEqual(getRefreshButtonState({
+    target: 'table-data',
+    hasDatabase: true,
+    hasActiveTable: false,
+  }), { disabled: true });
+  assert.deepEqual(getRefreshButtonState({
+    target: 'table-data',
+    hasDatabase: true,
+    hasActiveTable: true,
+  }), { disabled: false });
+});
 
 test('editable table cells select first, then expose double-click edit and copy guidance', () => {
   assert.deepEqual(getCellInteraction({ tableType: 'table', value: 'Ada' }), {

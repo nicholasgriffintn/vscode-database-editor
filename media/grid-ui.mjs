@@ -54,6 +54,18 @@ export function getPagerState({ page, pageSize, filteredRows, totalRows }) {
   };
 }
 
+export function getRefreshButtonState({ target, hasDatabase, hasActiveTable }) {
+  if (target === 'objects') {
+    return { disabled: !hasDatabase };
+  }
+
+  if (target === 'table-data') {
+    return { disabled: !hasDatabase || !hasActiveTable };
+  }
+
+  return { disabled: true };
+}
+
 export function shouldKeepKeyboardShortcutInField({ key, metaKey, ctrlKey, shiftKey, targetTagName }) {
   return getTextEditingShortcutAction({ key, metaKey, ctrlKey, shiftKey, targetTagName }) !== null;
 }

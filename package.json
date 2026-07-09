@@ -1,7 +1,7 @@
 {
   "name": "vscode-database-editor",
   "displayName": "Database Editor",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "NicholasGriffin",
   "license": "Apache-2.0",
   "icon": "images/database-editor-icon.png",

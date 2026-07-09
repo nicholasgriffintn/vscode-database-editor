@@ -16,6 +16,7 @@ import {
   getPinnedCellStyle,
   getPinnedColumnLayout,
   getPinnedRowOffset,
+  getRefreshButtonState,
   getRowActions,
   getTextEditingShortcutAction,
   shouldKeepKeyboardShortcutInField,
@@ -190,9 +191,26 @@ function buildShell() {
   });
 
   const sidebar = createElement('aside', { className: 'sidebar' });
+  const objectRefresh = createElement('button', {
+    className: 'icon-button object-refresh-button',
+    text: '\u21BB',
+    title: 'Refresh tables, views, indexes, and triggers',
+    attributes: {
+      type: 'button',
+      'aria-label': 'Refresh database objects',
+      'data-action': 'refresh-objects',
+      disabled: 'true',
+    },
+  });
   const filterInput = createElement('input', {
     className: 'filter-input',
     attributes: { type: 'search', placeholder: 'Filter rows' },
+  });
+  const dataRefresh = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Refresh data',
+    title: 'Refresh rows for the selected table or view',
+    attributes: { type: 'button', 'data-action': 'refresh-data', disabled: 'true' },
   });
   const pageSizeSelect = createElement('select', { className: 'page-size' });
   for (const size of [50, 100, 250, 500]) {
@@ -350,6 +368,7 @@ function buildShell() {
         className: 'toolbar',
         children: [
           filterInput,
+          dataRefresh,
           createElement('span', { className: 'toolbar-spacer' }),
           exportCsv,
           exportSql,
@@ -460,7 +479,9 @@ function buildShell() {
     saveButton,
     tabs: [dataTab, schemaTab, queryTab],
     sidebar,
+    objectRefresh,
     filterInput,
+    dataRefresh,
     previousPage,
     nextPage,
     pageLabel,
@@ -702,6 +723,23 @@ function updateSaveUi() {
   elements.status.textContent = getDirtyStatusText({ hasDatabase, isDirty, isSaving });
 }
 
+function updateRefreshUi() {
+  const hasDatabase = Boolean(db);
+  const hasActiveTable = Boolean(getActiveTable());
+  const objectState = getRefreshButtonState({
+    target: 'objects',
+    hasDatabase,
+    hasActiveTable,
+  });
+  const dataState = getRefreshButtonState({
+    target: 'table-data',
+    hasDatabase,
+    hasActiveTable,
+  });
+  elements.objectRefresh.disabled = objectState.disabled;
+  elements.dataRefresh.disabled = dataState.disabled;
+}
+
 async function refreshTables() {
   schemaObjects = getSchemaObjects(db);
   tables = readTableMetadata(db, schemaObjects);
@@ -724,6 +762,7 @@ async function refreshRows() {
     visibleRows = [];
     elements.grid.replaceChildren(createElement('div', { className: 'empty-state', text: 'No tables found.' }));
     updatePager();
+    updateRefreshUi();
     return;
   }
 
@@ -751,6 +790,8 @@ async function refreshRows() {
     updatePager();
   } catch (error) {
     elements.grid.replaceChildren(createElement('div', { className: 'error-state', text: getErrorMessage(error) }));
+  } finally {
+    updateRefreshUi();
   }
 }
 
@@ -766,7 +807,10 @@ function renderSidebar() {
       'data-object-search': 'true',
     },
   });
-  elements.sidebar.append(createElement('div', { className: 'object-search-wrap', children: [search] }));
+  elements.sidebar.append(createElement('div', {
+    className: 'object-search-wrap',
+    children: [search, elements.objectRefresh],
+  }));
 
   appendObjectSection('Tables', tables.filter((table) => table.type === 'table'));
   appendObjectSection('Views', tables.filter((table) => table.type === 'view'));
@@ -1446,6 +1490,12 @@ function handleDoubleClick(event) {
 
 async function runAction(action, sourceElement = null) {
   switch (action) {
+    case 'refresh-objects':
+      await refreshTables();
+      break;
+    case 'refresh-data':
+      await refreshRows();
+      break;
     case 'previous-page':
       if (page > 1) {
         page -= 1;
