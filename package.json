@@ -178,6 +178,7 @@
           "type": "object",
           "properties": {}
         },
+        "when": "config.databaseEditor.copilot.enable",
         "tags": [
           "sqlite",
           "database",
@@ -204,6 +205,7 @@
             }
           }
         },
+        "when": "config.databaseEditor.copilot.enable",
         "tags": [
           "sqlite",
           "database",
@@ -243,6 +245,7 @@
             "queryDescription"
           ]
         },
+        "when": "config.databaseEditor.copilot.enable",
         "tags": [
           "sqlite",
           "database",
@@ -283,7 +286,7 @@
             "statementDescription"
           ]
         },
-        "when": "config.databaseEditor.copilot.accessMode == rw",
+        "when": "config.databaseEditor.copilot.enable && config.databaseEditor.copilot.accessMode == rw",
         "tags": [
           "sqlite",
           "database",

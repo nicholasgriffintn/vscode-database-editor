@@ -18,6 +18,31 @@ export function cloneData(data: Uint8Array): Uint8Array {
   return copy;
 }
 
+export async function applySnapshotDocumentChange<T extends SnapshotDocument>({
+  document,
+  data,
+  label,
+  emitEdit,
+  postSnapshot,
+  postAfterApply = false,
+}: {
+  document: T;
+  data: Uint8Array;
+  label?: string;
+  emitEdit: (event: SnapshotEditEvent<T>) => void;
+  postSnapshot: SnapshotPost;
+  postAfterApply?: boolean;
+}): Promise<void> {
+  const before = cloneData(document.getData());
+  const after = cloneData(data);
+  document.updateData(cloneData(after));
+  emitEdit(createSnapshotEditEvent({ document, before, after, label, postSnapshot }));
+
+  if (postAfterApply) {
+    await postSnapshot(cloneData(after));
+  }
+}
+
 export function createSnapshotEditEvent<T extends SnapshotDocument>({
   document,
   before,

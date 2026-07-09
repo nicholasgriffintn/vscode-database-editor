@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-import { cloneData, createSnapshotEditEvent } from './custom-document-history';
+import { applySnapshotDocumentChange } from './custom-document-history';
 import { createSqliteChatParticipant } from './sqlite-ai/chat-participant';
 import { SqliteDocumentRegistry } from './sqlite-ai/sqlite-document-registry';
 import { loadSqlJs } from './sqlite-ai/sqljs-host';
@@ -10,6 +10,9 @@ const viewType = 'databaseEditor.sqlite';
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new SqliteEditorProvider(context);
+  const getCopilotEnabled = () => vscode.workspace
+    .getConfiguration('databaseEditor.copilot')
+    .get('enable', true);
   const getAccessMode = () => vscode.workspace
     .getConfiguration('databaseEditor.copilot')
     .get<'ro' | 'rw'>('accessMode', 'ro');
@@ -19,6 +22,7 @@ export function activate(context: vscode.ExtensionContext): void {
     extensionUri: context.extensionUri,
     loadSqlJs,
     getAccessMode,
+    getCopilotEnabled,
   });
 
   context.subscriptions.push(
@@ -41,7 +45,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.commands.executeCommand('workbench.action.files.save');
     }),
     vscode.commands.registerCommand('databaseEditor.copilot.chatWithDatabase', async () => {
-      if (!vscode.workspace.getConfiguration('databaseEditor.copilot').get('enable', true)) {
+      if (!getCopilotEnabled()) {
         await vscode.window.showWarningMessage('Copilot integration is disabled.');
         return;
       }
@@ -226,7 +230,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
   }
 
   async applyCopilotDatabaseChange(document: SqliteDocument, data: Uint8Array, label: string): Promise<void> {
-    await this.applyDatabaseChange(document, data, label);
+    await this.applyDatabaseChange(document, data, label, true);
   }
 
   private async postDocument(panel: vscode.WebviewPanel, document: SqliteDocument): Promise<void> {
@@ -237,22 +241,27 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     });
   }
 
-  private async applyDatabaseChange(document: SqliteDocument, data: Uint8Array, label?: string): Promise<void> {
-    const before = cloneData(document.getData());
-    document.updateData(data);
-    this.changeEmitter.fire(createSnapshotEditEvent({
+  private async applyDatabaseChange(
+    document: SqliteDocument,
+    data: Uint8Array,
+    label?: string,
+    refreshPanels = false,
+  ): Promise<void> {
+    const postSnapshot = async (snapshot: Uint8Array): Promise<void> => {
+      await this.postToDocumentPanels(document, {
+        type: 'loadDatabase',
+        name: vscode.workspace.asRelativePath(document.uri),
+        data: toArrayBuffer(snapshot),
+      });
+    };
+    await applySnapshotDocumentChange({
       document,
-      before,
-      after: data,
+      data,
       label: label ?? 'Edit SQLite database',
-      postSnapshot: async (snapshot) => {
-        await this.postToDocumentPanels(document, {
-          type: 'loadDatabase',
-          name: vscode.workspace.asRelativePath(document.uri),
-          data: toArrayBuffer(snapshot),
-        });
-      },
-    }));
+      emitEdit: (event) => this.changeEmitter.fire(event),
+      postSnapshot,
+      postAfterApply: refreshPanels,
+    });
   }
 
   private async postToDocumentPanels(document: SqliteDocument, message: ExtensionMessage): Promise<void> {

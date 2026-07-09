@@ -30,6 +30,7 @@ type CreateSqliteToolsOptions<TDocument extends SqliteToolDocument> = {
   extensionUri: vscode.Uri;
   loadSqlJs(extensionUri: vscode.Uri): Promise<SqlJsStatic>;
   getAccessMode(): 'ro' | 'rw';
+  getCopilotEnabled(): boolean;
 };
 
 type DbContextInput = {
@@ -58,6 +59,8 @@ export const SQLITE_TOOL_NAMES = [
   'databaseEditor_modify',
 ] as const;
 
+const QUERY_ROW_LIMIT = 200;
+
 export function createSqliteTools<TDocument extends SqliteToolDocument>(
   options: CreateSqliteToolsOptions<TDocument>,
 ): SqliteTools {
@@ -66,6 +69,10 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
   ]);
 
   const error = (message: string) => result({ error: message });
+
+  const disabledError = () => options.getCopilotEnabled()
+    ? undefined
+    : error('Copilot integration is disabled in Database Editor settings.');
 
   async function openDatabase(input: { databaseUri?: string }): Promise<{
     document?: TDocument;
@@ -92,11 +99,15 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
 
   return {
     listOpenDatabases: {
-      invoke: () => result({ databases: options.registry.listOpenDatabases() }),
+      invoke: () => disabledError() ?? result({ databases: options.registry.listOpenDatabases() }),
       prepareInvocation: () => ({ invocationMessage: 'Listing open SQLite databases' }),
     },
     dbContext: {
       invoke: async ({ input }) => {
+        const disabled = disabledError();
+        if (disabled) {
+          return disabled;
+        }
         const opened = await openDatabase(input ?? {});
         if (opened.error || !opened.document || !opened.db) {
           return opened.error;
@@ -114,6 +125,10 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
     },
     query: {
       invoke: async ({ input }) => {
+        const disabled = disabledError();
+        if (disabled) {
+          return disabled;
+        }
         if (!input?.query || !isReadOnlyQuery(input.query)) {
           return error('Only one read-only SELECT or safe WITH query is allowed.');
         }
@@ -124,12 +139,13 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
         }
 
         try {
-          const rows = executeRows(opened.db, input.query);
-          const capped = capRows(rows);
+          const rows = executeRows(opened.db, input.query, QUERY_ROW_LIMIT + 1);
+          const capped = capRows(rows, QUERY_ROW_LIMIT);
           return result({
             queryName: input.queryName,
             columns: rows.length > 0 ? Object.keys(rows[0]) : getColumns(opened.db, input.query),
             ...capped,
+            rowCount: capped.rows.length,
           });
         } catch (caught) {
           return error(getErrorMessage(caught));
@@ -143,6 +159,10 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
     },
     modify: {
       invoke: async ({ input }) => {
+        const disabled = disabledError();
+        if (disabled) {
+          return disabled;
+        }
         if (options.getAccessMode() !== 'rw') {
           return error('Read/write Copilot tools are disabled. Set databaseEditor.copilot.accessMode to "rw" to enable confirmed modifications.');
         }
@@ -275,12 +295,15 @@ function getRowCount(db: SqlJsDatabase, objectName: string): number | null {
   }
 }
 
-function executeRows(db: SqlJsDatabase, sql: string): Record<string, unknown>[] {
+function executeRows(db: SqlJsDatabase, sql: string, rowLimit?: number): Record<string, unknown>[] {
   const statement = db.prepare(sql);
   const rows: Record<string, unknown>[] = [];
   try {
     while (statement.step()) {
       rows.push(statement.getAsObject());
+      if (rowLimit !== undefined && rows.length >= rowLimit) {
+        break;
+      }
     }
   } finally {
     statement.free();

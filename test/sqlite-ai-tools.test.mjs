@@ -54,6 +54,25 @@ test('read-only query returns capped rows without mutating database bytes', asyn
   assert.deepEqual([...harness.document.getData()], before);
 });
 
+test('read-only query stops stepping after the response cap plus one truncation row', async () => {
+  let stepCount = 0;
+  const harness = createToolHarness({
+    sqlStatic: createTrackingSqlStatic(() => {
+      stepCount += 1;
+    }),
+  });
+  const result = await invokeJson(harness.tools.query, {
+    query: 'WITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 500) SELECT value FROM sequence',
+    queryName: 'sequence',
+    queryDescription: 'Generate more rows than the response cap',
+  });
+
+  assert.equal(result.rows.length, 200);
+  assert.equal(result.rowCount, 200);
+  assert.equal(result.truncated, true);
+  assert.equal(stepCount, 201);
+});
+
 test('query tool rejects updates and leaves bytes unchanged', async () => {
   const harness = createToolHarness();
   const before = [...harness.document.getData()];
@@ -65,6 +84,29 @@ test('query tool rejects updates and leaves bytes unchanged', async () => {
 
   assert.equal(result.error, 'Only one read-only SELECT or safe WITH query is allowed.');
   assert.deepEqual([...harness.document.getData()], before);
+});
+
+test('all Copilot tools refuse invocation when the integration is disabled', async () => {
+  const harness = createToolHarness({ copilotEnabled: false, accessMode: 'rw' });
+  const invocations = [
+    invokeJson(harness.tools.listOpenDatabases, {}),
+    invokeJson(harness.tools.dbContext, {}),
+    invokeJson(harness.tools.query, {
+      query: 'SELECT * FROM people',
+      queryName: 'people',
+      queryDescription: 'List people',
+    }),
+    invokeJson(harness.tools.modify, {
+      statement: 'INSERT INTO people (name) VALUES ("Katherine")',
+      statementName: 'add person',
+      statementDescription: 'Adds a person',
+    }),
+  ];
+
+  for (const result of await Promise.all(invocations)) {
+    assert.equal(result.error, 'Copilot integration is disabled in Database Editor settings.');
+  }
+  assert.deepEqual(harness.appliedLabels, []);
 });
 
 test('modify tool refuses writes when access mode is read-only', async () => {
@@ -117,7 +159,7 @@ test('modify tool rolls back invalid statements without altering bytes', async (
   assert.deepEqual(harness.appliedLabels, []);
 });
 
-function createToolHarness({ accessMode = 'rw' } = {}) {
+function createToolHarness({ accessMode = 'rw', copilotEnabled = true, sqlStatic = SQL } = {}) {
   const document = createFixtureDocument();
   const appliedLabels = [];
   const registry = {
@@ -135,12 +177,34 @@ function createToolHarness({ accessMode = 'rw' } = {}) {
   const tools = createSqliteTools({
     vscode: createVscodeStub(),
     registry,
-    loadSqlJs: async () => SQL,
+    loadSqlJs: async () => sqlStatic,
     extensionUri: { fsPath: process.cwd() },
     getAccessMode: () => accessMode,
+    getCopilotEnabled: () => copilotEnabled,
   });
 
   return { document, appliedLabels, tools };
+}
+
+function createTrackingSqlStatic(onStep) {
+  return {
+    Database: class {
+      constructor(data) {
+        const db = new SQL.Database(data);
+        const prepare = db.prepare.bind(db);
+        db.prepare = (sql) => {
+          const statement = prepare(sql);
+          const step = statement.step.bind(statement);
+          statement.step = () => {
+            onStep();
+            return step();
+          };
+          return statement;
+        };
+        return db;
+      }
+    },
+  };
 }
 
 function createFixtureDocument() {

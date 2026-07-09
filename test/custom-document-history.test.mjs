@@ -3,7 +3,34 @@ import test from 'node:test';
 
 import historyModule from '../dist/custom-document-history.js';
 
-const { cloneData, createSnapshotEditEvent } = historyModule;
+const { applySnapshotDocumentChange, cloneData, createSnapshotEditEvent } = historyModule;
+
+test('host-originated snapshot changes post updated bytes after registering the edit', async () => {
+  const events = [];
+  const posted = [];
+  const document = {
+    data: new Uint8Array([1, 1]),
+    getData() {
+      return this.data;
+    },
+    updateData(data) {
+      this.data = data;
+    },
+  };
+
+  await applySnapshotDocumentChange({
+    document,
+    data: new Uint8Array([2, 2]),
+    label: 'Copilot: add person',
+    emitEdit: (event) => events.push(event),
+    postSnapshot: (data) => posted.push([...data]),
+    postAfterApply: true,
+  });
+
+  assert.deepEqual([...document.getData()], [2, 2]);
+  assert.equal(events.at(-1).label, 'Copilot: add person');
+  assert.deepEqual(posted, [[2, 2]]);
+});
 
 test('snapshot edit events restore before and after document bytes', async () => {
   const posted = [];
