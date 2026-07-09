@@ -20,6 +20,7 @@ import {
   getRefreshButtonState,
   getRowActions,
   getRowSelectionKey,
+  ROW_NUMBER_COLUMN_WIDTH,
   getSelectedVisibleRows,
   getSelectAllRowsState,
   getTextEditingShortcutAction,
@@ -1276,7 +1277,7 @@ function renderGrid() {
     columns: table.columns,
     pinnedColumns,
     columnWidths,
-    rowNumberWidth: columnWidths.__rowNumber || 52,
+    rowNumberWidth: columnWidths.__rowNumber || ROW_NUMBER_COLUMN_WIDTH,
   });
 
   // Row # column (sticky top-left corner)
@@ -1378,7 +1379,7 @@ function renderGrid() {
         createElement('div', {
           className: 'column-header row-actions-heading',
           children: [
-            createElement('span', { className: 'column-name', text: 'Actions' }),
+            createElement('span', { className: 'column-name', text: 'actions' }),
           ],
         }),
       ],
@@ -1437,26 +1438,30 @@ function renderGrid() {
         zIndex: isRowPinned ? 20 : undefined,
       }),
       children: [
-        createElement('input', {
-          className: 'row-select-checkbox',
-          title: isRowSelectedForBatch ? 'Deselect row' : 'Select row',
-          attributes: {
-            type: 'checkbox',
-            'data-select-row': String(rowIndex),
-            checked: isRowSelectedForBatch ? 'true' : undefined,
-            'aria-label': `Select row ${realRowIndex + 1}`,
-          },
-        }),
-        createElement('button', {
-          className: 'row-number-button',
-          attributes: { type: 'button', 'data-pin-row': String(rowIndex) },
+        createElement('div', {
+          className: 'row-number-content',
           children: [
+            createElement('input', {
+              className: 'row-select-checkbox',
+              title: isRowSelectedForBatch ? 'Deselect row' : 'Select row',
+              attributes: {
+                type: 'checkbox',
+                'data-select-row': String(rowIndex),
+                checked: isRowSelectedForBatch ? 'true' : undefined,
+                'aria-label': `Select row ${realRowIndex + 1}`,
+              },
+            }),
             createElement('span', { className: 'row-number-text', text: String(realRowIndex + 1) }),
-            createElement('span', {
-              className: `row-pin-icon${isRowPinned ? ' pinned' : ''}`,
-              text: '\u{1F4CC}',
+            createElement('button', {
+              className: `row-pin-button${isRowPinned ? ' pinned' : ''}`,
               title: isRowPinned ? 'Unpin row' : 'Pin row to top',
-              attributes: { 'data-pin-row': String(rowIndex) },
+              attributes: { type: 'button', 'data-pin-row': String(rowIndex), 'aria-label': isRowPinned ? `Unpin row ${realRowIndex + 1}` : `Pin row ${realRowIndex + 1}` },
+              children: [
+                createElement('span', {
+                  className: `row-pin-icon${isRowPinned ? ' pinned' : ''}`,
+                  text: '\u{1F4CC}',
+                }),
+              ],
             }),
           ],
         }),

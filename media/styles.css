@@ -7,6 +7,8 @@
   --accent-fg: var(--vscode-button-foreground, #ffffff);
   --row-hover: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
   --row-active: var(--vscode-list-activeSelectionBackground, rgba(0, 127, 212, 0.22));
+  --row-selected: var(--vscode-list-inactiveSelectionBackground, #2a2d35);
+  --row-selected-strong: var(--vscode-list-inactiveSelectionBackground, #303543);
   --cell-null: var(--vscode-disabledForeground, #777777);
   --surface-0: var(--vscode-editor-background, #0b0d12);
   --surface-1: var(--vscode-sideBar-background, #11131a);
@@ -19,6 +21,7 @@
   --text-secondary: var(--vscode-descriptionForeground, #a4a9b6);
   --grid-header-height: 56px;
   --grid-filter-height: 38px;
+  --row-number-column-width: 64px;
   --radius-sm: 5px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -616,38 +619,44 @@ button {
 }
 
 .row-actions-heading {
-  justify-content: center;
-  text-align: center;
+  justify-content: flex-start;
+  text-align: left;
 }
 
 .row-actions-heading .column-name {
-  overflow: visible;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 590;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: normal;
+  text-transform: none;
   white-space: nowrap;
 }
 
 .row-actions-filter-heading {
   background: var(--surface-2);
+  background-clip: padding-box;
 }
 
 .row-actions-cell {
   width: 128px;
   min-width: 128px;
   max-width: 128px;
-  padding: 5px 8px;
+  padding: 0;
   vertical-align: middle;
   white-space: nowrap;
+  background: var(--surface-0);
+  background-clip: padding-box;
 }
 
 .row-action-group {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 8px;
 }
 
 .row-action-button {
@@ -694,9 +703,24 @@ button {
 }
 
 .cell-button:hover,
-.selected-row .cell-button,
 .selected-cell .cell-button {
   background: var(--row-hover);
+}
+
+.selected-row td {
+  background: var(--row-selected);
+}
+
+.selected-row td.row-number-cell,
+.selected-row td.row-actions-cell,
+.selected-row td.pinned,
+.selected-row td.pinned-row-cell {
+  background: var(--row-selected-strong);
+}
+
+.selected-row .cell-button,
+.selected-row .row-pin-button {
+  background: transparent;
 }
 
 .selected-cell .cell-button {
@@ -716,23 +740,25 @@ button {
 
 /* === Row # column (sticky top-left corner) === */
 .row-number-header {
-  width: 64px;
-  min-width: 64px;
-  max-width: 64px;
+  width: var(--row-number-column-width);
+  min-width: var(--row-number-column-width);
+  max-width: var(--row-number-column-width);
   background: var(--surface-2);
+  background-clip: padding-box;
 }
 
 .data-grid th.row-number-header {
   position: sticky;
   left: 0;
   z-index: 50;
+  box-shadow: inset -1px 0 0 var(--hairline), inset 0 -1px 0 var(--hairline);
 }
 
 .row-number-header .column-header {
   justify-content: center;
   gap: 6px;
   min-height: var(--grid-header-height);
-  padding: 8px 4px;
+  padding: 8px 6px;
 }
 
 .row-number-heading-label {
@@ -741,61 +767,81 @@ button {
 }
 
 .row-number-cell {
-  width: 64px;
-  min-width: 64px;
-  max-width: 64px;
+  width: var(--row-number-column-width);
+  min-width: var(--row-number-column-width);
+  max-width: var(--row-number-column-width);
   padding: 0;
   background: var(--surface-0);
+  background-clip: padding-box;
   white-space: nowrap;
+  vertical-align: middle;
 }
 
 .data-grid td.row-number-cell {
   position: sticky;
   left: 0;
   z-index: 15;
+  box-shadow: inset -1px 0 0 var(--hairline);
 }
 
-.row-number-button {
-  display: inline-flex;
+.row-number-content {
+  display: grid;
+  grid-template-columns: 14px minmax(16px, 1fr) 22px;
   align-items: center;
-  justify-content: center;
-  gap: 2px;
-  width: auto;
-  height: 100%;
-  min-height: 29px;
-  padding: 6px 2px;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  vertical-align: middle;
-}
-
-.row-number-button:hover {
-  background: var(--row-hover);
+  gap: 3px;
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 5px;
 }
 
 .row-number-text {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+}
+
+.row-pin-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 100ms ease, background 100ms ease, border-color 100ms ease, color 100ms ease;
+}
+
+.row-number-cell:hover .row-pin-button,
+.row-pin-button:focus-visible,
+.row-pin-button.pinned {
+  opacity: 1;
+}
+
+.row-pin-button:hover,
+.row-pin-button.pinned {
+  border-color: var(--hairline-strong);
+  background: var(--row-hover);
+}
+
+.row-pin-button.pinned {
+  color: var(--accent);
 }
 
 .row-pin-icon {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
-  opacity: 0;
-  transition: opacity 100ms ease;
-}
-
-.row-number-button:hover .row-pin-icon,
-.row-pin-icon.pinned {
-  opacity: 0.6;
-}
-
-.row-pin-icon.pinned {
-  opacity: 1;
-  color: var(--accent);
+  pointer-events: none;
 }
 
 tr.pinned-row {
@@ -820,11 +866,11 @@ tr.pinned-row .row-number-cell {
 }
 
 .row-select-checkbox {
+  display: block;
   width: 13px;
   height: 13px;
-  margin: 0 0 0 4px;
+  margin: 0;
   accent-color: var(--accent);
-  vertical-align: middle;
 }
 
 .row-number-header .row-select-checkbox {

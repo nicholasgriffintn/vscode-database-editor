@@ -175,11 +175,13 @@ function normalizeSelectionKeyValue(value) {
   return value;
 }
 
+export const ROW_NUMBER_COLUMN_WIDTH = 64;
+
 export function getPinnedColumnLayout({
   columns,
   pinnedColumns,
   columnWidths = {},
-  rowNumberWidth = 52,
+  rowNumberWidth = ROW_NUMBER_COLUMN_WIDTH,
   fallbackWidth = 150,
 }) {
   let left = rowNumberWidth;

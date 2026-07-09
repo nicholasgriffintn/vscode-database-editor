@@ -216,9 +216,9 @@ test('pinned columns get sequential sticky offsets after the row-number column',
     pinnedColumns: new Set(['id', 'email', 'notes']),
     columnWidths: { id: 80, email: 240 },
   }), {
-    id: { left: 52, width: 80, style: 'width:80px;min-width:80px;max-width:80px;left:52px;z-index:5' },
-    email: { left: 132, width: 240, style: 'width:240px;min-width:240px;max-width:240px;left:132px;z-index:5' },
-    notes: { left: 372, width: 150, style: 'width:150px;min-width:150px;max-width:150px;left:372px;z-index:5' },
+    id: { left: 64, width: 80, style: 'width:80px;min-width:80px;max-width:80px;left:64px;z-index:5' },
+    email: { left: 144, width: 240, style: 'width:240px;min-width:240px;max-width:240px;left:144px;z-index:5' },
+    notes: { left: 384, width: 150, style: 'width:150px;min-width:150px;max-width:150px;left:384px;z-index:5' },
   });
   assert.equal(getPinnedColumnLayout({
     columns: ['created_at', 'category'],
