@@ -30,21 +30,32 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 
 ### GitHub Copilot integration
 
-When GitHub Copilot Chat is installed, use `@sqlite` or the “Chat with SQLite Database” editor action to work with the SQLite database currently open in the editor. The integration keeps database access inside the extension host: Copilot can ask the extension for schema details, run capped read-only queries, and, when enabled, apply confirmed database changes through the same dirty/save/undo flow as manual edits.
+When GitHub Copilot Chat is installed, use `@sqlite`, its `/schema`, `/query`, `/explain`, and `/profile` commands, or the “Chat with SQLite Database” editor action. The participant keeps recent conversation turns and receives privacy-safe editor context: the active database, selected table/view, filters, and sort state. Grid row values are never included in that automatic context.
 
-Use it for tasks such as:
+Copilot tools can:
 
-- **Understanding a database** — Ask what tables, views, columns, indexes, triggers, and foreign keys exist.
-- **Writing queries** — Ask Copilot to draft SQL against the real schema instead of guessing table or column names.
-- **Inspecting data** — Let Agent Mode run safe `SELECT` or `WITH` queries and return capped JSON results.
-- **Planning changes** — Ask for schema or data changes, review the generated SQL, then decide whether to apply it.
+- List open databases and require an explicit `databaseUri` whenever more than one is open.
+- Return a paginated schema summary or focused columns, keys, indexes, triggers, and CREATE SQL for the selected object.
+- Run validated `SELECT`/safe `WITH` queries with cancellation, a configurable time budget, and a configurable row cap.
+- Run grounded `EXPLAIN QUERY PLAN` analysis and aggregate table profiling without returning sample rows.
+- In read/write mode, apply one confirmed modification or an atomic, confirmed multi-statement migration through the editor's dirty/save/undo history.
 
 The integration has two access modes:
 
-- **Read-only (`ro`)** — The default. Copilot can list open databases, inspect schema, and run one safe read-only query at a time. It cannot run `INSERT`, `UPDATE`, `DELETE`, DDL, `PRAGMA`, `ATTACH`, `VACUUM`, or multi-statement scripts.
-- **Read/write (`rw`)** — Enables the modification tool. Copilot can propose a single write or schema statement, but VS Code asks for confirmation before it runs. Confirmed changes update the custom document, mark it dirty, refresh the webview, and can be saved or undone normally.
+- **Read-only (`ro`)** — The default. Copilot can inspect schema and run validated read-only query and analysis tools. It cannot run `INSERT`, `UPDATE`, `DELETE`, DDL, `PRAGMA`, `ATTACH`, `VACUUM`, or scripts.
+- **Read/write (`rw`)** — Enables confirmed modification and migration tools. Confirmations identify the target database and preview the SQL. Successful changes refresh the webview, mark the document dirty, and can be saved, undone, or redone normally.
 
-Set `databaseEditor.copilot.accessMode` to `rw` only when you want Copilot to be able to make user-confirmed changes. Set `databaseEditor.copilot.enable` to `false` to hide the `@sqlite` participant and Agent Mode tools.
+### Copilot privacy and limits
+
+Query rows are processed inside the extension host and sent to the language model only when a query tool is used. Columns matching `databaseEditor.copilot.sensitiveColumnPatterns` are replaced with `[REDACTED]` before tool results are returned. Defaults cover common password, token, secret, API-key, and SSN names. This name-based redaction is a safeguard, not a substitute for reviewing database contents before granting Copilot access.
+
+- `databaseEditor.copilot.enable` hides the participant and tools and also blocks tool invocation at runtime.
+- `databaseEditor.copilot.accessMode` controls read-only versus confirmed read/write access.
+- `databaseEditor.copilot.maxResultRows` controls the query response cap (default 200, maximum 500).
+- `databaseEditor.copilot.queryTimeoutMs` controls the soft query/analysis time budget (default 5000 ms).
+- `databaseEditor.copilot.sensitiveColumnPatterns` configures case-insensitive regular expressions used for value redaction.
+
+SQLite runs in-process, so cancellation and timeout checks occur between SQLite result steps; they cannot interrupt a single long native/WASM step. Set `databaseEditor.copilot.accessMode` to `rw` only when you intend to review and confirm database changes.
 
 ![GitHub Copilot Chat integration demo](docs/copilot-demo.gif)
 

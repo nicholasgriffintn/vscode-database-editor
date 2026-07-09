@@ -35,12 +35,17 @@ export function isAllowedModification(sql: string): boolean {
   return MODIFICATION_KEYWORDS.test(statement) && !TRANSACTION_KEYWORDS.test(statement);
 }
 
-export function capRows(rows: Record<string, unknown>[], maxRows = 200): {
+export function capRows(
+  rows: Record<string, unknown>[],
+  maxRows = 200,
+  redactedColumns: RegExp[] = [],
+  redactedColumnNames: ReadonlySet<string> = new Set(),
+): {
   rows: Record<string, unknown>[];
   truncated: boolean;
   rowCount: number;
 } {
-  const cappedRows = rows.slice(0, maxRows).map(jsonSafeRow);
+  const cappedRows = rows.slice(0, maxRows).map((row) => jsonSafeRow(row, redactedColumns, redactedColumnNames));
   return {
     rows: cappedRows,
     truncated: rows.length > maxRows,
@@ -61,8 +66,17 @@ export function jsonSafeValue(value: unknown): unknown {
   return value ?? null;
 }
 
-function jsonSafeRow(row: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, jsonSafeValue(value)]));
+function jsonSafeRow(
+  row: Record<string, unknown>,
+  redactedColumns: RegExp[],
+  redactedColumnNames: ReadonlySet<string>,
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(row).map(([key, value]) => [
+    key,
+    redactedColumnNames.has(key) || redactedColumns.some((pattern) => pattern.test(key))
+      ? '[REDACTED]'
+      : jsonSafeValue(value),
+  ]));
 }
 
 function stripSqlComments(sql: string): string {

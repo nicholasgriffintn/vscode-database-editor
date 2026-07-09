@@ -32,6 +32,33 @@ test('host-originated snapshot changes post updated bytes after registering the 
   assert.deepEqual(posted, [[2, 2]]);
 });
 
+test('host-originated snapshot changes do not mutate document when initial refresh fails', async () => {
+  const events = [];
+  const document = {
+    data: new Uint8Array([1, 2, 3]),
+    getData() {
+      return this.data;
+    },
+    updateData(data) {
+      this.data = data;
+    },
+  };
+
+  await assert.rejects(() => applySnapshotDocumentChange({
+    document,
+    data: new Uint8Array([4, 5, 6]),
+    label: 'Copilot migration',
+    emitEdit: (event) => events.push(event),
+    postSnapshot: async () => {
+      throw new Error('webview disposed');
+    },
+    postAfterApply: true,
+  }), /webview disposed/);
+
+  assert.deepEqual([...document.getData()], [1, 2, 3]);
+  assert.deepEqual(events, []);
+});
+
 test('snapshot edit events restore before and after document bytes', async () => {
   const posted = [];
   const document = {

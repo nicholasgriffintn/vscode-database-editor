@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   getCellInteraction,
   getCellClipboardText,
+  getCopilotSelectionContext,
   getGridColumnStyle,
   getObjectItemInteraction,
   getPagerState,
@@ -15,6 +16,25 @@ import {
   getTextEditingShortcutAction,
   shouldKeepKeyboardShortcutInField,
 } from '../media/grid-ui.mjs';
+
+test('Copilot selection context includes grid state without row values', () => {
+  assert.deepEqual(getCopilotSelectionContext({
+    table: { name: 'people', type: 'table' },
+    filter: 'Ada',
+    columnFilters: { team: 'Computing', empty: '' },
+    sortColumn: 'name',
+    sortDirection: 'desc',
+    selectedColumns: ['name'],
+  }), {
+    objectName: 'people',
+    objectType: 'table',
+    filter: 'Ada',
+    columnFilters: { team: 'Computing' },
+    sortColumn: 'name',
+    sortDirection: 'desc',
+    selectedColumns: ['name'],
+  });
+});
 
 test('database object refresh is available whenever a database is open', () => {
   assert.deepEqual(getRefreshButtonState({

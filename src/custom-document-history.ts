@@ -35,12 +35,13 @@ export async function applySnapshotDocumentChange<T extends SnapshotDocument>({
 }): Promise<void> {
   const before = cloneData(document.getData());
   const after = cloneData(data);
-  document.updateData(cloneData(after));
-  emitEdit(createSnapshotEditEvent({ document, before, after, label, postSnapshot }));
 
   if (postAfterApply) {
     await postSnapshot(cloneData(after));
   }
+
+  document.updateData(cloneData(after));
+  emitEdit(createSnapshotEditEvent({ document, before, after, label, postSnapshot }));
 }
 
 export function createSnapshotEditEvent<T extends SnapshotDocument>({

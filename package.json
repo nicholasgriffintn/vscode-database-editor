@@ -44,7 +44,10 @@
     "onLanguageModelTool:databaseEditor_list_open_databases",
     "onLanguageModelTool:databaseEditor_db_context",
     "onLanguageModelTool:databaseEditor_query",
-    "onLanguageModelTool:databaseEditor_modify"
+    "onLanguageModelTool:databaseEditor_explain",
+    "onLanguageModelTool:databaseEditor_profile",
+    "onLanguageModelTool:databaseEditor_modify",
+    "onLanguageModelTool:databaseEditor_migrate"
   ],
   "main": "./dist/extension.js",
   "extensionKind": [
@@ -72,6 +75,29 @@
           "tags": [
             "experimental"
           ]
+        },
+        "databaseEditor.copilot.maxResultRows": {
+          "type": "integer",
+          "default": 200,
+          "minimum": 1,
+          "maximum": 500,
+          "markdownDescription": "Maximum rows returned by a Copilot SQLite query.",
+          "scope": "window"
+        },
+        "databaseEditor.copilot.queryTimeoutMs": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 30000,
+          "markdownDescription": "Soft execution time budget for Copilot read-only queries and analysis.",
+          "scope": "window"
+        },
+        "databaseEditor.copilot.sensitiveColumnPatterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["password", "passwd", "token", "secret", "api[_-]?key", "ssn"],
+          "markdownDescription": "Case-insensitive regular expressions for columns whose query values are redacted before being returned to Copilot.",
+          "scope": "window"
         },
         "databaseEditor.copilot.accessMode": {
           "type": "string",
@@ -151,6 +177,12 @@
         "description": "Helps you inspect, query, and edit open SQLite databases.",
         "id": "database-editor.sqlite-chat",
         "isSticky": true,
+        "commands": [
+          { "name": "schema", "description": "Inspect the selected database object or schema" },
+          { "name": "query", "description": "Write or run a read-only SQLite query" },
+          { "name": "explain", "description": "Explain a read-only query plan" },
+          { "name": "profile", "description": "Profile the selected table or view" }
+        ],
         "disambiguation": [
           {
             "category": "databases",
@@ -202,6 +234,14 @@
             "objectName": {
               "type": "string",
               "description": "Optional table or view name to focus on."
+            },
+            "offset": {
+              "type": "number",
+              "description": "Zero-based object offset for paginating schema summaries. Use nextOffset from the previous result to request the next page."
+            },
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of schema objects to return for summary pages. Defaults to 50 and is capped at 100."
             }
           }
         },
@@ -254,6 +294,43 @@
         ]
       },
       {
+        "name": "databaseEditor_explain",
+        "displayName": "Explain SQLite Query Plan",
+        "modelDescription": "Runs EXPLAIN QUERY PLAN for one validated read-only SELECT/WITH query.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "sqliteExplain",
+        "icon": "$(graph)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "databaseUri": { "type": "string", "description": "Explicit open database URI." },
+            "query": { "type": "string", "description": "One read-only SELECT or safe WITH query." },
+            "queryName": { "type": "string", "description": "Short query name." }
+          },
+          "required": ["query", "queryName"]
+        },
+        "when": "config.databaseEditor.copilot.enable",
+        "tags": ["sqlite", "query", "analysis", "readonly"]
+      },
+      {
+        "name": "databaseEditor_profile",
+        "displayName": "Profile SQLite Object",
+        "modelDescription": "Returns row count, null counts, and distinct counts for a focused table or view without returning sample values.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "sqliteProfile",
+        "icon": "$(pulse)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "databaseUri": { "type": "string", "description": "Explicit open database URI." },
+            "objectName": { "type": "string", "description": "Table or view to profile." }
+          },
+          "required": ["objectName"]
+        },
+        "when": "config.databaseEditor.copilot.enable",
+        "tags": ["sqlite", "database", "analysis", "readonly"]
+      },
+      {
         "name": "databaseEditor_modify",
         "displayName": "Modify SQLite Database",
         "modelDescription": "Runs one user-confirmed SQLite write or schema statement against an open database. Only available when databaseEditor.copilot.accessMode is read/write. Use for CREATE, ALTER, DROP, INSERT, UPDATE, DELETE after explaining the change clearly.",
@@ -293,6 +370,26 @@
           "schema",
           "write"
         ]
+      },
+      {
+        "name": "databaseEditor_migrate",
+        "displayName": "Apply SQLite Migration",
+        "modelDescription": "Atomically executes 1-50 user-confirmed SQLite modification statements as one undoable database edit.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "sqliteMigrate",
+        "icon": "$(git-merge)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "databaseUri": { "type": "string", "description": "Explicit open database URI." },
+            "statements": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50 },
+            "migrationName": { "type": "string", "description": "Short migration name." },
+            "migrationDescription": { "type": "string", "description": "What the migration changes and why." }
+          },
+          "required": ["statements", "migrationName", "migrationDescription"]
+        },
+        "when": "config.databaseEditor.copilot.enable && config.databaseEditor.copilot.accessMode == rw",
+        "tags": ["sqlite", "database", "migration", "write"]
       }
     ],
     "menus": {

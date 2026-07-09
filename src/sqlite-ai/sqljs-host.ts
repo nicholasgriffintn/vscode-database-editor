@@ -18,6 +18,7 @@ export type SqlJsStatement = {
   bind(params?: unknown[]): void;
   step(): boolean;
   getAsObject(): Record<string, unknown>;
+  getColumnNames(): string[];
   free(): void;
 };
 

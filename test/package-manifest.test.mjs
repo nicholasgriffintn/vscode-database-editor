@@ -9,20 +9,30 @@ test('Copilot language-model tools are hidden when the integration is disabled',
     manifest.contributes.languageModelTools.map((tool) => [tool.name, tool]),
   );
 
-  assert.equal(
-    tools.databaseEditor_list_open_databases.when,
-    'config.databaseEditor.copilot.enable',
-  );
-  assert.equal(
-    tools.databaseEditor_db_context.when,
-    'config.databaseEditor.copilot.enable',
-  );
-  assert.equal(
-    tools.databaseEditor_query.when,
-    'config.databaseEditor.copilot.enable',
-  );
-  assert.equal(
-    tools.databaseEditor_modify.when,
-    'config.databaseEditor.copilot.enable && config.databaseEditor.copilot.accessMode == rw',
-  );
+  for (const name of [
+    'databaseEditor_list_open_databases',
+    'databaseEditor_db_context',
+    'databaseEditor_query',
+    'databaseEditor_explain',
+    'databaseEditor_profile',
+  ]) {
+    assert.equal(tools[name].when, 'config.databaseEditor.copilot.enable');
+  }
+
+  for (const name of ['databaseEditor_modify', 'databaseEditor_migrate']) {
+    assert.equal(
+      tools[name].when,
+      'config.databaseEditor.copilot.enable && config.databaseEditor.copilot.accessMode == rw',
+    );
+  }
+});
+
+test('schema context tool manifest exposes pagination inputs', () => {
+  const tool = manifest.contributes.languageModelTools.find((candidate) => candidate.name === 'databaseEditor_db_context');
+  const properties = tool.inputSchema.properties;
+
+  assert.equal(properties.offset.type, 'number');
+  assert.match(properties.offset.description, /nextOffset|page/i);
+  assert.equal(properties.limit.type, 'number');
+  assert.match(properties.limit.description, /objects|page/i);
 });

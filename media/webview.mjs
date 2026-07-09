@@ -10,6 +10,7 @@ import { safeFileName } from './file-utils.mjs';
 import {
   getCellInteraction,
   getCellClipboardText,
+  getCopilotSelectionContext,
   getGridColumnStyle,
   getObjectItemInteraction,
   getPagerState,
@@ -763,6 +764,7 @@ async function refreshRows() {
     elements.grid.replaceChildren(createElement('div', { className: 'empty-state', text: 'No tables found.' }));
     updatePager();
     updateRefreshUi();
+    postCopilotSelectionContext();
     return;
   }
 
@@ -792,7 +794,22 @@ async function refreshRows() {
     elements.grid.replaceChildren(createElement('div', { className: 'error-state', text: getErrorMessage(error) }));
   } finally {
     updateRefreshUi();
+    postCopilotSelectionContext();
   }
+}
+
+function postCopilotSelectionContext() {
+  vscode.postMessage({
+    type: 'copilotSelectionChanged',
+    context: getCopilotSelectionContext({
+      table: getActiveTable(),
+      filter,
+      columnFilters,
+      sortColumn,
+      sortDirection,
+      selectedColumns: selectedCell?.columnName ? [selectedCell.columnName] : [],
+    }),
+  });
 }
 
 function renderSidebar() {
@@ -1331,6 +1348,7 @@ function selectGridRow(rowIndex) {
   gridEl?.querySelectorAll('.selected-row').forEach((row) => row.classList.remove('selected-row'));
   gridEl?.querySelectorAll('.selected-cell').forEach((cell) => cell.classList.remove('selected-cell'));
   gridEl?.querySelector(`tr[data-row="${CSS.escape(String(rowIndex))}"]`)?.classList.add('selected-row');
+  postCopilotSelectionContext();
 }
 
 function selectGridCell(rowIndex, columnName) {
@@ -1342,6 +1360,7 @@ function selectGridCell(rowIndex, columnName) {
   const row = gridEl?.querySelector(`tr[data-row="${CSS.escape(String(rowIndex))}"]`);
   row?.classList.add('selected-row');
   row?.querySelector(`[data-grid-cell-column="${CSS.escape(columnName)}"]`)?.classList.add('selected-cell');
+  postCopilotSelectionContext();
 }
 
 async function copyGridCell(rowIndex, columnName) {

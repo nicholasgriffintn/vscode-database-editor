@@ -54,3 +54,16 @@ test('row capping reports truncation and converts values to JSON-safe shapes', (
   });
   assert.equal(jsonSafeValue(undefined), null);
 });
+
+test('row capping redacts values from sensitive columns', () => {
+  const result = capRows([
+    { id: 1, password_hash: 'hash', apiToken: 'token', name: 'Ada' },
+  ], 10, [/password/i, /token/i]);
+
+  assert.deepEqual(result.rows, [{
+    id: 1,
+    password_hash: '[REDACTED]',
+    apiToken: '[REDACTED]',
+    name: 'Ada',
+  }]);
+});

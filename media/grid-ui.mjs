@@ -70,6 +70,19 @@ export function shouldKeepKeyboardShortcutInField({ key, metaKey, ctrlKey, shift
   return getTextEditingShortcutAction({ key, metaKey, ctrlKey, shiftKey, targetTagName }) !== null;
 }
 
+export function getCopilotSelectionContext({ table, filter, columnFilters, sortColumn, sortDirection, selectedColumns }) {
+  const activeColumnFilters = Object.fromEntries(
+    Object.entries(columnFilters ?? {}).filter(([, value]) => value !== ''),
+  );
+  return {
+    ...(table ? { objectName: table.name, objectType: table.type } : {}),
+    ...(filter ? { filter } : {}),
+    ...(Object.keys(activeColumnFilters).length > 0 ? { columnFilters: activeColumnFilters } : {}),
+    ...(sortColumn ? { sortColumn, sortDirection } : {}),
+    ...(selectedColumns?.length ? { selectedColumns: [...new Set(selectedColumns)] } : {}),
+  };
+}
+
 export function getTextEditingShortcutAction({ key, metaKey = false, ctrlKey = false, shiftKey = false, targetTagName }) {
   if (!metaKey && !ctrlKey) {
     return null;

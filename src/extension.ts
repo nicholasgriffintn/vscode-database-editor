@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 
 import { applySnapshotDocumentChange } from './custom-document-history';
-import { createSqliteChatParticipant } from './sqlite-ai/chat-participant';
+import { createSqliteChatParticipant, createSqliteFollowupProvider } from './sqlite-ai/chat-participant';
 import { SqliteDocumentRegistry } from './sqlite-ai/sqlite-document-registry';
+import type { SqliteSelectionContext, SqliteSelectionUpdate } from './sqlite-ai/sqlite-document-registry';
 import { loadSqlJs } from './sqlite-ai/sqljs-host';
 import { createSqliteTools } from './sqlite-ai/tools';
 
@@ -16,6 +17,21 @@ export function activate(context: vscode.ExtensionContext): void {
   const getAccessMode = () => vscode.workspace
     .getConfiguration('databaseEditor.copilot')
     .get<'ro' | 'rw'>('accessMode', 'ro');
+  const getQueryOptions = () => {
+    const configuration = vscode.workspace.getConfiguration('databaseEditor.copilot');
+    return {
+      maxResultRows: configuration.get('maxResultRows', 200),
+      timeoutMs: configuration.get('queryTimeoutMs', 5_000),
+      sensitiveColumnPatterns: configuration.get<string[]>('sensitiveColumnPatterns', [
+        'password',
+        'passwd',
+        'token',
+        'secret',
+        'api[_-]?key',
+        'ssn',
+      ]),
+    };
+  };
   const tools = createSqliteTools({
     vscode,
     registry: provider,
@@ -23,7 +39,18 @@ export function activate(context: vscode.ExtensionContext): void {
     loadSqlJs,
     getAccessMode,
     getCopilotEnabled,
+    getQueryOptions,
   });
+  const sqliteParticipant = vscode.chat.createChatParticipant(
+    'database-editor.sqlite-chat',
+    createSqliteChatParticipant({
+      vscode,
+      registry: provider,
+      getAccessMode,
+      getCopilotEnabled,
+    }),
+  );
+  sqliteParticipant.followupProvider = createSqliteFollowupProvider();
 
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(viewType, provider, {
@@ -53,22 +80,17 @@ export function activate(context: vscode.ExtensionContext): void {
       const databaseUri = provider.getActiveDocumentUri();
       const databaseHint = databaseUri ? ` Use databaseUri "${databaseUri}".` : '';
       await vscode.commands.executeCommand('workbench.action.chat.open', {
-        mode: 'agent',
-        query: `Use #sqliteDatabases to find the active SQLite database, then use #sqliteSchema to inspect it.${databaseHint} Summarize the schema and await further instructions.`,
+        query: `@sqlite /schema Inspect the active SQLite database.${databaseHint} Summarize the selected object or schema and await further instructions.`,
       });
     }),
     vscode.lm.registerTool('databaseEditor_list_open_databases', tools.listOpenDatabases),
     vscode.lm.registerTool('databaseEditor_db_context', tools.dbContext),
     vscode.lm.registerTool('databaseEditor_query', tools.query),
+    vscode.lm.registerTool('databaseEditor_explain', tools.explain),
+    vscode.lm.registerTool('databaseEditor_profile', tools.profile),
     vscode.lm.registerTool('databaseEditor_modify', tools.modify),
-    vscode.chat.createChatParticipant(
-      'database-editor.sqlite-chat',
-      createSqliteChatParticipant({
-        vscode,
-        registry: provider,
-        getAccessMode,
-      }),
-    ),
+    vscode.lm.registerTool('databaseEditor_migrate', tools.migrate),
+    sqliteParticipant,
   );
 }
 
@@ -149,6 +171,9 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
         case 'databaseChanged':
           await this.applyDatabaseChange(document, new Uint8Array(message.data), message.label);
           break;
+        case 'copilotSelectionChanged':
+          this.registry.updateSelectionContext(document, message.context);
+          break;
         case 'requestSave':
           await vscode.commands.executeCommand('workbench.action.files.save');
           break;
@@ -227,6 +252,10 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
 
   getActiveDocumentUri(): string | undefined {
     return this.registry.getActiveDocumentUri();
+  }
+
+  getSelectionContext(uri?: string): SqliteSelectionContext | undefined {
+    return this.registry.getSelectionContext(uri);
   }
 
   async applyCopilotDatabaseChange(document: SqliteDocument, data: Uint8Array, label: string): Promise<void> {
@@ -369,6 +398,7 @@ function escapeAttribute(value: string): string {
 type WebviewMessage =
   | { type: 'ready' }
   | { type: 'databaseChanged'; data: ArrayBuffer; label?: string }
+  | { type: 'copilotSelectionChanged'; context: SqliteSelectionUpdate }
   | { type: 'requestSave' }
   | { type: 'error'; message: string }
   | { type: 'clipboardWrite'; text: string }

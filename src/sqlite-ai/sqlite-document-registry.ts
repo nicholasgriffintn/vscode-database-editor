@@ -11,10 +11,24 @@ export type OpenDatabaseSummary = {
   active: boolean;
 };
 
+export type SqliteSelectionContext = {
+  databaseUri: string;
+  objectName?: string;
+  objectType?: 'table' | 'view';
+  filter?: string;
+  columnFilters?: Record<string, string>;
+  sortColumn?: string;
+  sortDirection?: 'asc' | 'desc';
+  selectedColumns?: string[];
+};
+
+export type SqliteSelectionUpdate = Omit<SqliteSelectionContext, 'databaseUri'>;
+
 type OpenSqliteDocument<TDocument extends RegistrySqliteDocument> = {
   document: TDocument;
   panels: Set<vscode.WebviewPanel>;
   lastActiveAt: number;
+  selection?: SqliteSelectionUpdate;
 };
 
 export class SqliteDocumentRegistry<TDocument extends RegistrySqliteDocument> {
@@ -75,6 +89,30 @@ export class SqliteDocumentRegistry<TDocument extends RegistrySqliteDocument> {
 
   getActiveDocumentUri(): string | undefined {
     return this.getActiveDocument()?.uri.toString();
+  }
+
+  updateSelectionContext(document: TDocument, selection: SqliteSelectionUpdate): void {
+    const entry = this.openDocuments.get(document.uri.toString());
+    if (entry) {
+      entry.selection = {
+        ...selection,
+        columnFilters: selection.columnFilters ? { ...selection.columnFilters } : undefined,
+      };
+    }
+  }
+
+  getSelectionContext(uri?: string): SqliteSelectionContext | undefined {
+    const document = this.resolveDocument(uri);
+    if (!document) {
+      return undefined;
+    }
+
+    const selection = this.openDocuments.get(document.uri.toString())?.selection;
+    return {
+      databaseUri: document.uri.toString(),
+      ...selection,
+      columnFilters: selection?.columnFilters ? { ...selection.columnFilters } : undefined,
+    };
   }
 
   getPanels(document: TDocument): vscode.WebviewPanel[] {
