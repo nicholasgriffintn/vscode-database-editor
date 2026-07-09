@@ -5,6 +5,7 @@ import {
   getCellInteraction,
   getCellClipboardText,
   getCopilotSelectionContext,
+  getDeleteRowsConfirmationMessage,
   getGridColumnStyle,
   getObjectItemInteraction,
   getPagerState,
@@ -145,6 +146,17 @@ test('select-all state reports checked and indeterminate states for visible rows
     selectedVisibleCount: 2,
     visibleCount: 2,
   });
+});
+
+test('delete selected rows confirmation message names the selected row count', () => {
+  assert.equal(
+    getDeleteRowsConfirmationMessage(1),
+    'Delete 1 selected row? This cannot be undone until you use VS Code Undo.',
+  );
+  assert.equal(
+    getDeleteRowsConfirmationMessage(1200),
+    'Delete 1,200 selected rows? This cannot be undone until you use VS Code Undo.',
+  );
 });
 
 test('row actions are per-row and table-only', () => {

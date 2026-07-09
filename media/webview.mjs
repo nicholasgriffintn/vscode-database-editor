@@ -11,6 +11,7 @@ import {
   getCellInteraction,
   getCellClipboardText,
   getCopilotSelectionContext,
+  getDeleteRowsConfirmationMessage,
   getGridColumnStyle,
   getObjectItemInteraction,
   getPagerState,
@@ -2451,6 +2452,53 @@ async function deleteSelectedRows() {
   await deleteRows(getVisibleSelectedRows(), { confirm: true });
 }
 
+function confirmDeleteRows(count) {
+  return new Promise((resolve) => {
+    const message = getDeleteRowsConfirmationMessage(count);
+    const dialog = createElement('dialog', { className: 'insert-dialog confirm-dialog' });
+    const cancel = createElement('button', {
+      className: 'toolbar-button',
+      text: 'Cancel',
+      attributes: { type: 'button' },
+    });
+    const remove = createElement('button', {
+      className: 'toolbar-button danger',
+      text: count === 1 ? 'Delete row' : `Delete ${count.toLocaleString()} rows`,
+      attributes: { type: 'button' },
+    });
+    const form = createElement('form', { attributes: { method: 'dialog' } });
+    form.append(
+      createElement('h2', { text: 'Delete selected rows' }),
+      createElement('p', { className: 'confirm-message', text: message }),
+      createElement('div', { className: 'dialog-actions', children: [cancel, remove] }),
+    );
+    dialog.append(form);
+    document.body.append(dialog);
+
+    let resolved = false;
+    function finish(value) {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolve(value);
+      dialog.close();
+    }
+
+    cancel.addEventListener('click', () => finish(false));
+    remove.addEventListener('click', () => finish(true));
+    dialog.addEventListener('close', () => {
+      if (!resolved) {
+        resolved = true;
+        resolve(false);
+      }
+      dialog.remove();
+    });
+    dialog.showModal();
+    cancel.focus();
+  });
+}
+
 async function deleteRows(rows, { confirm = true } = {}) {
   const table = getActiveTable();
   if (!table || table.type === 'view' || rows.length === 0) {
@@ -2458,7 +2506,7 @@ async function deleteRows(rows, { confirm = true } = {}) {
   }
 
   const count = rows.length;
-  if (confirm && !window.confirm(`Delete ${count.toLocaleString()} selected ${count === 1 ? 'row' : 'rows'}? This cannot be undone until you use VS Code Undo.`)) {
+  if (confirm && !(await confirmDeleteRows(count))) {
     return { deleted: false };
   }
 

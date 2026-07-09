@@ -1490,6 +1490,12 @@ tr.pinned-row.multi-selected-row .row-number-cell {
   letter-spacing: -0.01em;
 }
 
+.confirm-message {
+  margin: 0 0 16px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
 .insert-fields {
   display: grid;
   gap: 8px;

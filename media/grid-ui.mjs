@@ -165,6 +165,11 @@ export function getSelectAllRowsState({ visibleRows, selectedRowKeys }) {
   };
 }
 
+export function getDeleteRowsConfirmationMessage(count) {
+  const rowCount = Math.max(0, Number(count) || 0);
+  return `Delete ${rowCount.toLocaleString()} selected ${rowCount === 1 ? 'row' : 'rows'}? This cannot be undone until you use VS Code Undo.`;
+}
+
 function normalizeSelectionKeyValue(value) {
   if (value instanceof Uint8Array) {
     return { type: 'blob', bytes: Array.from(value) };
