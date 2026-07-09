@@ -29,6 +29,21 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 4. Click any cell to edit its value, or use the Actions column to add/delete rows.
 5. Press `Ctrl+S` (`Cmd+S` on macOS) or click the Save button to persist changes.
 
+### Schema tools
+
+Use the Schema tab to understand and evolve the database structure without leaving the editor. The default Graph view visualizes tables, views, columns, primary keys, foreign keys, and directed relationships; switch to DDL whenever you want the generated SQLite definition for the selected object.
+
+The schema tools support:
+
+- Relationship graph cards for tables and views, including PK/FK/not-null/type markers on columns.
+- Directed foreign-key edges from referencing columns to referenced columns, with isolated tables still shown.
+- Graph and DDL views side by side in the same Schema tab, so visual inspection does not replace the textual schema.
+- Clicking a graph card to select that table/view and sync the sidebar, DDL, and data grid.
+- Table management actions for creating, renaming, and dropping tables, plus adding or removing columns.
+- Automatic refresh after schema changes so the graph, sidebar, DDL, and grid stay in sync.
+
+Schema changes run against the editor's in-memory database copy first. Save with the normal VS Code `Ctrl+S` / `Cmd+S` flow when you're ready to persist them.
+
 ### SQL workspace
 
 Use the SQL workspace to inspect data, run schema introspection, or apply manual SQLite changes against the editor's in-memory database copy. Successful write scripts mark the custom editor dirty and refresh the sidebar/grid; persist them with the normal VS Code save flow.

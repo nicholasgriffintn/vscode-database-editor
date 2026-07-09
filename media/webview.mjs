@@ -36,6 +36,12 @@ import {
 import { getDirtyStatusText, getSaveButtonState } from './save-state.mjs';
 import { getGridColumnCount, getGridEmptyStateKind } from './grid-empty-state.mjs';
 import {
+  buildSchemaGraphModel,
+  getSchemaGraphEdgePath,
+  getSchemaGraphEmptyState,
+  layoutSchemaGraph,
+} from './schema-graph.mjs';
+import {
   getSchemaObjects,
   queryAll,
   readTableMetadata,
@@ -103,6 +109,7 @@ let selectedCell = null;
 let querySql = 'SELECT name, type FROM sqlite_schema ORDER BY type, name;';
 let queryHistory = normalizeQueryHistory(webviewState.queryHistory);
 let schemaObjects = [];
+let activeSchemaView = 'graph';
 let isDirty = false;
 let isSaving = false;
 let pinnedColumns = new Set();
@@ -311,7 +318,31 @@ function buildShell() {
     text: 'Drop table',
     attributes: { type: 'button', 'data-action': 'drop-table' },
   });
-  const schema = createElement('pre', { className: 'schema-view' });
+  const schema = createElement('pre', { className: 'schema-view hidden' });
+  const schemaGraph = createElement('div', { className: 'schema-graph-wrap' });
+  const schemaGraphButton = createElement('button', {
+    className: 'segmented-button active',
+    text: 'Graph',
+    attributes: { type: 'button', 'data-action': 'schema-view-graph' },
+  });
+  const schemaDdlButton = createElement('button', {
+    className: 'segmented-button',
+    text: 'DDL',
+    attributes: { type: 'button', 'data-action': 'schema-view-ddl' },
+  });
+  const schemaGraphFit = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Fit',
+    title: 'Reset the graph scroll position to the top-left bounds',
+    attributes: { type: 'button', 'data-action': 'schema-graph-fit' },
+  });
+  const schemaGraphLayout = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Auto layout',
+    title: 'Recompute the schema graph layout',
+    attributes: { type: 'button', 'data-action': 'schema-graph-layout' },
+  });
+  const schemaGraphSummary = createElement('div', { className: 'schema-graph-summary' });
   const schemaPanel = createElement('section', {
     className: 'schema-panel hidden',
     children: [
@@ -324,14 +355,24 @@ function buildShell() {
               createElement('div', { className: 'schema-heading-title', text: 'Schema tools' }),
               createElement('div', {
                 className: 'schema-heading-description',
-                text: 'Manage the selected table and inspect generated SQLite definitions.',
+                text: 'Visualize table relationships, manage the selected table, or inspect generated SQLite definitions.',
               }),
             ],
           }),
           createElement('div', { className: 'schema-toolbar', children: [newTable, renameTable, addColumn, dropColumn, dropTable] }),
         ],
       }),
-      schema,
+      createElement('div', {
+        className: 'schema-subtoolbar',
+        children: [
+          createElement('div', { className: 'schema-view-switch', children: [schemaGraphButton, schemaDdlButton] }),
+          schemaGraphSummary,
+          createElement('span', { className: 'toolbar-spacer' }),
+          schemaGraphFit,
+          schemaGraphLayout,
+        ],
+      }),
+      createElement('div', { className: 'schema-body', children: [schemaGraph, schema] }),
     ],
   });
   const queryInput = createElement('textarea', {
@@ -495,6 +536,18 @@ function buildShell() {
     document.addEventListener('mouseup', onMouseUp);
   });
 
+  schemaGraph.addEventListener('keydown', async (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    const graphTable = event.target.closest?.('[data-schema-graph-table]');
+    if (!graphTable) {
+      return;
+    }
+    event.preventDefault();
+    await selectTable(graphTable.dataset.schemaGraphTable);
+  });
+
   return {
     title,
     status,
@@ -520,6 +573,12 @@ function buildShell() {
     grid,
     pager,
     schema,
+    schemaGraph,
+    schemaGraphButton,
+    schemaDdlButton,
+    schemaGraphFit,
+    schemaGraphLayout,
+    schemaGraphSummary,
     schemaPanel,
     data,
     query,
@@ -918,6 +977,8 @@ function renderSchema() {
   const table = getActiveTable();
   if (!table) {
     elements.schema.textContent = 'No schema available.';
+    renderSchemaGraph();
+    setActiveSchemaView(activeSchemaView);
     return;
   }
 
@@ -932,7 +993,7 @@ function renderSchema() {
     return parts.join(' · ');
   });
   const foreignKeyLines = table.foreignKeys.map((key) => (
-    `- ${key.from} -> ${key.table}.${key.to} on update ${key.on_update} on delete ${key.on_delete}`
+    `- ${key.from} -> ${key.table}.${key.to || 'rowid'} on update ${key.on_update ?? 'NO ACTION'} on delete ${key.on_delete ?? 'NO ACTION'}`
   ));
   const indexLines = table.indexes.map((index) => `- ${index.name}\n${index.sql}`);
   const triggerLines = table.triggers.map((trigger) => `- ${trigger.name}\n${trigger.sql}`);
@@ -954,6 +1015,219 @@ function renderSchema() {
     'Triggers',
     triggerLines.join('\n\n') || '- none',
   ].join('\n');
+  renderSchemaGraph();
+  setActiveSchemaView(activeSchemaView);
+}
+
+function renderSchemaGraph() {
+  const emptyState = getSchemaGraphEmptyState(tables);
+  const model = layoutSchemaGraph(buildSchemaGraphModel(tables));
+  const relationshipLabel = `${model.edges.length.toLocaleString()} ${model.edges.length === 1 ? 'relationship' : 'relationships'}`;
+  elements.schemaGraphSummary.textContent = tables.length === 0
+    ? 'No tables'
+    : `${tables.length.toLocaleString()} ${tables.length === 1 ? 'object' : 'objects'} · ${relationshipLabel}`;
+  elements.schemaGraphFit.disabled = tables.length === 0;
+  elements.schemaGraphLayout.disabled = tables.length === 0;
+
+  if (emptyState?.kind === 'no-tables') {
+    elements.schemaGraph.replaceChildren(buildSchemaGraphEmptyState(emptyState));
+    return;
+  }
+
+  const svg = createSvgElement('svg', {
+    className: 'schema-graph',
+    attributes: {
+      role: 'img',
+      'aria-label': 'SQLite schema relationship graph',
+      viewBox: `0 0 ${model.bounds.width} ${model.bounds.height}`,
+      width: String(model.bounds.width),
+      height: String(model.bounds.height),
+    },
+  });
+  svg.append(buildSchemaGraphDefs());
+
+  const edgeLayer = createSvgElement('g', { className: 'schema-graph-edges' });
+  const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
+  for (const edge of model.edges) {
+    const sourceNode = nodeById.get(edge.sourceTable);
+    const targetNode = nodeById.get(edge.targetTable);
+    if (!sourceNode || !targetNode) {
+      continue;
+    }
+
+    const path = createSvgElement('path', {
+      className: 'schema-graph-edge',
+      attributes: {
+        d: getSchemaGraphEdgePath({ edge, sourceNode, targetNode }),
+        'marker-end': 'url(#schema-graph-arrow)',
+      },
+    });
+    path.append(createSvgElement('title', { text: buildSchemaGraphEdgeTitle(edge) }));
+    edgeLayer.append(path);
+  }
+  svg.append(edgeLayer);
+
+  const nodeLayer = createSvgElement('g', { className: 'schema-graph-nodes' });
+  for (const node of model.nodes) {
+    nodeLayer.append(renderSchemaGraphNode(node));
+  }
+  svg.append(nodeLayer);
+
+  const children = [];
+  if (emptyState?.kind === 'no-relationships') {
+    children.push(buildSchemaGraphEmptyState(emptyState, { compact: true }));
+  }
+  if (model.skippedEdgeCount > 0) {
+    children.push(createElement('div', {
+      className: 'schema-graph-note',
+      text: `${model.skippedEdgeCount.toLocaleString()} foreign-key ${model.skippedEdgeCount === 1 ? 'edge points' : 'edges point'} to missing tables and ${model.skippedEdgeCount === 1 ? 'was' : 'were'} hidden.`,
+    }));
+  }
+  children.push(svg);
+  elements.schemaGraph.replaceChildren(...children);
+}
+
+function buildSchemaGraphEmptyState(state, { compact = false } = {}) {
+  return createElement('div', {
+    className: compact ? 'schema-graph-empty compact' : 'schema-graph-empty',
+    children: [
+      createElement('div', { className: 'schema-graph-empty-title', text: state.title }),
+      createElement('div', { className: 'schema-graph-empty-description', text: state.description }),
+    ],
+  });
+}
+
+function buildSchemaGraphDefs() {
+  const defs = createSvgElement('defs');
+  const marker = createSvgElement('marker', {
+    className: 'schema-graph-arrow-marker',
+    attributes: {
+      id: 'schema-graph-arrow',
+      viewBox: '0 0 10 10',
+      refX: '9',
+      refY: '5',
+      markerWidth: '7',
+      markerHeight: '7',
+      orient: 'auto-start-reverse',
+    },
+  });
+  marker.append(createSvgElement('path', { attributes: { d: 'M 0 0 L 10 5 L 0 10 z' } }));
+  defs.append(marker);
+  return defs;
+}
+
+function renderSchemaGraphNode(node) {
+  const group = createSvgElement('g', {
+    className: [
+      'schema-graph-node',
+      node.tableType === 'view' ? 'view-node' : 'table-node',
+      node.tableName === activeTableName ? 'active' : '',
+    ].filter(Boolean).join(' '),
+    attributes: {
+      transform: `translate(${node.x} ${node.y})`,
+      tabindex: '0',
+      role: 'button',
+      'data-schema-graph-table': node.tableName,
+      'aria-label': `${node.tableType} ${node.tableName}`,
+    },
+  });
+  group.append(createSvgElement('title', { text: `${node.tableType} ${node.tableName} · ${node.rowCount.toLocaleString()} rows` }));
+  group.append(createSvgElement('rect', {
+    className: 'schema-graph-card',
+    attributes: { width: String(node.width), height: String(node.height), rx: '10', ry: '10' },
+  }));
+  group.append(createSvgElement('rect', {
+    className: 'schema-graph-card-header',
+    attributes: { width: String(node.width), height: '34', rx: '10', ry: '10' },
+  }));
+  group.append(createSvgElement('text', {
+    className: 'schema-graph-table-name',
+    text: node.tableName,
+    attributes: { x: '12', y: '22' },
+  }));
+  group.append(createSvgElement('text', {
+    className: 'schema-graph-table-meta',
+    text: node.tableType === 'view' ? 'VIEW' : `${node.rowCount.toLocaleString()} rows`,
+    attributes: { x: String(node.width - 12), y: '22', 'text-anchor': 'end' },
+  }));
+
+  node.columns.forEach((column, index) => {
+    const y = 34 + (index * 24);
+    const row = createSvgElement('g', { className: 'schema-graph-column-row' });
+    row.append(createSvgElement('rect', {
+      attributes: { x: '0', y: String(y), width: String(node.width), height: '24' },
+    }));
+    if (column.foreignKey) {
+      row.append(createSvgElement('circle', {
+        className: 'schema-graph-handle source',
+        attributes: { cx: String(node.width), cy: String(y + 12), r: '3.5' },
+      }));
+    }
+    row.append(createSvgElement('circle', {
+      className: 'schema-graph-handle target',
+      attributes: { cx: '0', cy: String(y + 12), r: '3' },
+    }));
+    row.append(createSvgElement('text', {
+      className: 'schema-graph-column-name',
+      text: column.name,
+      attributes: { x: '12', y: String(y + 16) },
+    }));
+    const badges = [];
+    if (column.primaryKey) badges.push('PK');
+    if (column.foreignKey) badges.push('FK');
+    if (!column.nullable) badges.push('NN');
+    row.append(createSvgElement('text', {
+      className: `schema-graph-column-type${column.primaryKey ? ' pk' : ''}${column.foreignKey ? ' fk' : ''}`,
+      text: [badges.join(' '), column.type || 'ANY'].filter(Boolean).join(' · '),
+      attributes: { x: String(node.width - 12), y: String(y + 16), 'text-anchor': 'end' },
+    }));
+    row.append(createSvgElement('title', {
+      text: [
+        column.name,
+        column.type || 'ANY',
+        column.primaryKey ? 'primary key' : null,
+        column.foreignKey ? 'foreign key' : null,
+        column.nullable ? 'nullable' : 'not null',
+      ].filter(Boolean).join(' · '),
+    }));
+    group.append(row);
+  });
+
+  return group;
+}
+
+function buildSchemaGraphEdgeTitle(edge) {
+  return [
+    `${edge.sourceTable}.${edge.sourceColumn} → ${edge.targetTable}.${edge.targetColumn}`,
+    edge.onUpdate ? `ON UPDATE ${edge.onUpdate}` : null,
+    edge.onDelete ? `ON DELETE ${edge.onDelete}` : null,
+  ].filter(Boolean).join(' · ');
+}
+
+function createSvgElement(tagName, options = {}) {
+  const element = document.createElementNS('http://www.w3.org/2000/svg', tagName);
+  if (options.className) {
+    element.setAttribute('class', options.className);
+  }
+  if (options.text !== undefined) {
+    element.textContent = options.text;
+  }
+  if (options.attributes) {
+    for (const [name, value] of Object.entries(options.attributes)) {
+      if (value === undefined || value === null || value === false) {
+        continue;
+      }
+      element.setAttribute(name, String(value));
+    }
+  }
+  if (options.children) {
+    element.replaceChildren(...options.children);
+  }
+  return element;
+}
+
+function fitSchemaGraph() {
+  elements.schemaGraph.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
 }
 
 function renderGrid() {
@@ -1445,6 +1719,12 @@ async function handleClick(event) {
     return;
   }
 
+  const graphTable = event.target.closest('[data-schema-graph-table]');
+  if (graphTable) {
+    await selectTable(graphTable.dataset.schemaGraphTable);
+    return;
+  }
+
   const pinButton = event.target.closest('[data-pin-column]');
   if (pinButton) {
     rememberRenderedColumnWidths();
@@ -1480,16 +1760,7 @@ async function handleClick(event) {
 
   const tableButton = event.target.closest('[data-table]');
   if (tableButton) {
-    activeTableName = tableButton.dataset.table;
-    page = 1;
-    columnFilters = {};
-    sortColumn = null;
-    sortDirection = 'asc';
-    pinnedRows.clear();
-    pinnedColumns.clear();
-    renderSidebar();
-    renderSchema();
-    await refreshRows();
+    await selectTable(tableButton.dataset.table);
     return;
   }
 
@@ -1527,6 +1798,22 @@ function handleDoubleClick(event) {
   }
 
   showRowDetails(Number(gridCell.dataset.gridCellRow), gridCell.dataset.gridCellColumn);
+}
+
+async function selectTable(tableName) {
+  if (!tableName || !tables.some((table) => table.name === tableName)) {
+    return;
+  }
+  activeTableName = tableName;
+  page = 1;
+  columnFilters = {};
+  sortColumn = null;
+  sortDirection = 'asc';
+  pinnedRows.clear();
+  pinnedColumns.clear();
+  renderSidebar();
+  renderSchema();
+  await refreshRows();
 }
 
 async function runAction(action, sourceElement = null) {
@@ -1570,6 +1857,19 @@ async function runAction(action, sourceElement = null) {
     case 'save-database':
       requestSave();
       break;
+    case 'schema-view-graph':
+      setActiveSchemaView('graph');
+      break;
+    case 'schema-view-ddl':
+      setActiveSchemaView('ddl');
+      break;
+    case 'schema-graph-fit':
+      fitSchemaGraph();
+      break;
+    case 'schema-graph-layout':
+      renderSchemaGraph();
+      fitSchemaGraph();
+      break;
     case 'new-table':
       showCreateTableDialog();
       break;
@@ -1596,6 +1896,20 @@ function setActiveView(view) {
   elements.data.classList.toggle('hidden', view !== 'data');
   elements.schemaPanel.classList.toggle('hidden', view !== 'schema');
   elements.query.classList.toggle('hidden', view !== 'query');
+}
+
+function setActiveSchemaView(view) {
+  activeSchemaView = view === 'ddl' ? 'ddl' : 'graph';
+  const graphActive = activeSchemaView === 'graph';
+  elements.schemaGraph.classList.toggle('hidden', !graphActive);
+  elements.schema.classList.toggle('hidden', graphActive);
+  elements.schemaGraphButton.classList.toggle('active', graphActive);
+  elements.schemaDdlButton.classList.toggle('active', !graphActive);
+  elements.schemaGraphButton.setAttribute('aria-pressed', String(graphActive));
+  elements.schemaDdlButton.setAttribute('aria-pressed', String(!graphActive));
+  elements.schemaGraphFit.classList.toggle('hidden', !graphActive);
+  elements.schemaGraphLayout.classList.toggle('hidden', !graphActive);
+  elements.schemaGraphSummary.classList.toggle('hidden', !graphActive);
 }
 
 function showRowDetails(rowIndex, initialColumnName = null) {

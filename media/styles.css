@@ -867,6 +867,228 @@ tr.pinned-row .row-number-cell {
   gap: 8px;
 }
 
+.schema-subtoolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-1);
+}
+
+.schema-view-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.segmented-button {
+  min-height: 24px;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 510;
+}
+
+.segmented-button:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.segmented-button.active {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+.schema-graph-summary,
+.schema-graph-note {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.schema-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.schema-graph-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0) 0 0 / 18px 18px,
+    var(--surface-0);
+}
+
+.schema-graph-empty,
+.schema-graph-note {
+  width: fit-content;
+  max-width: min(560px, 100%);
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-1) 90%, transparent);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.schema-graph-empty:not(.compact) {
+  position: absolute;
+  inset: 14px;
+  display: grid;
+  width: auto;
+  max-width: none;
+  min-height: 220px;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.schema-graph-empty-title {
+  color: var(--text-primary);
+  font-weight: 590;
+}
+
+.schema-graph-empty-description {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.schema-graph {
+  display: block;
+  min-width: 100%;
+  min-height: 100%;
+  color: var(--text-primary);
+}
+
+.schema-graph-card {
+  fill: var(--surface-1);
+  stroke: var(--hairline-strong);
+  stroke-width: 1;
+  filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.16));
+}
+
+.schema-graph-card-header {
+  fill: var(--surface-2);
+  stroke: transparent;
+}
+
+.schema-graph-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.schema-graph-node:hover .schema-graph-card,
+.schema-graph-node.active .schema-graph-card,
+.schema-graph-node:focus .schema-graph-card {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.schema-graph-node.view-node {
+  opacity: 0.78;
+}
+
+.schema-graph-table-name {
+  fill: var(--text-primary);
+  font-size: 13px;
+  font-weight: 590;
+}
+
+.schema-graph-table-meta,
+.schema-graph-column-type {
+  fill: var(--text-secondary);
+  font-size: 10.5px;
+}
+
+.schema-graph-column-name {
+  fill: var(--text-primary);
+  font-size: 11.5px;
+}
+
+.schema-graph-column-type.pk {
+  fill: var(--badge-pk);
+}
+
+.schema-graph-column-type.fk {
+  fill: var(--badge-fk);
+}
+
+.schema-graph-column-type.pk.fk {
+  fill: var(--accent);
+}
+
+.schema-graph-column-row rect {
+  fill: transparent;
+  stroke: transparent;
+}
+
+.schema-graph-column-row:hover rect {
+  fill: rgba(255, 255, 255, 0.04);
+}
+
+.schema-graph-handle {
+  fill: var(--surface-0);
+  stroke: var(--hairline-strong);
+  stroke-width: 1;
+}
+
+.schema-graph-handle.source {
+  fill: var(--badge-fk);
+  stroke: var(--surface-0);
+}
+
+.schema-graph-edge {
+  fill: none;
+  stroke: color-mix(in srgb, var(--badge-fk) 72%, var(--text-secondary));
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.82;
+}
+
+.schema-graph-arrow-marker path {
+  fill: color-mix(in srgb, var(--badge-fk) 72%, var(--text-secondary));
+}
+
+.schema-graph-edges:hover .schema-graph-edge {
+  opacity: 0.58;
+}
+
+.schema-graph-edge:hover {
+  stroke: var(--accent);
+  opacity: 1 !important;
+}
+
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .schema-graph-empty,
+  .schema-graph-note {
+    background: var(--surface-1);
+  }
+
+  .schema-graph-edge {
+    stroke: var(--badge-fk);
+  }
+
+  .schema-graph-arrow-marker path {
+    fill: var(--badge-fk);
+  }
+}
+
 .query-header {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto;
