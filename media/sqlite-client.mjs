@@ -57,12 +57,18 @@ export function readTableMetadata(db, schemaObjects) {
   });
 }
 
-export function queryAll(db, sql, params = []) {
+export function queryAll(db, sql, params = [], options = {}) {
   const statement = db.prepare(sql);
+  const timeoutMs = Number(options.timeoutMs ?? 0);
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  const start = timeoutMs > 0 ? now() : 0;
   try {
     statement.bind(params);
     const rows = [];
     while (statement.step()) {
+      if (timeoutMs > 0 && now() - start > timeoutMs) {
+        throw new Error(`SQLite query timed out after ${timeoutMs} ms.`);
+      }
       rows.push(statement.getAsObject());
     }
     return rows;

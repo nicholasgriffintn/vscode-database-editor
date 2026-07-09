@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import { applySnapshotDocumentChange } from './custom-document-history';
+import type { SnapshotChangeEvent } from './custom-document-history';
 import { createSqliteChatParticipant, createSqliteFollowupProvider } from './sqlite-ai/chat-participant';
 import { SqliteDocumentRegistry } from './sqlite-ai/sqlite-document-registry';
 import type { SqliteSelectionContext, SqliteSelectionUpdate } from './sqlite-ai/sqlite-document-registry';
@@ -134,7 +135,7 @@ class SqliteDocument implements vscode.CustomDocument {
 }
 
 class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument> {
-  private readonly changeEmitter = new vscode.EventEmitter<vscode.CustomDocumentEditEvent<SqliteDocument>>();
+  private readonly changeEmitter = new vscode.EventEmitter<SnapshotChangeEvent<SqliteDocument>>();
   private readonly registry = new SqliteDocumentRegistry<SqliteDocument>();
 
   readonly onDidChangeCustomDocument = this.changeEmitter.event;
@@ -162,6 +163,16 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
 
     webview.html = this.getHtml(webview);
     this.registry.registerPanel(document, webviewPanel);
+
+    const configurationSubscription = vscode.workspace.onDidChangeConfiguration(async (event) => {
+      if (event.affectsConfiguration('databaseEditor', document.uri)) {
+        await webview.postMessage({
+          type: 'settingsChanged',
+          settings: this.getEditorSettings(document.uri),
+        });
+      }
+    });
+    webviewPanel.onDidDispose(() => configurationSubscription.dispose());
 
     webview.onDidReceiveMessage(async (message: WebviewMessage) => {
       switch (message.type) {
@@ -222,6 +233,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       type: 'loadDatabase',
       name: vscode.workspace.asRelativePath(document.uri),
       data: toArrayBuffer(document.getData()),
+      settings: this.getEditorSettings(document.uri),
     });
   }
 
@@ -263,10 +275,22 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
   }
 
   private async postDocument(panel: vscode.WebviewPanel, document: SqliteDocument): Promise<void> {
+    const settings = this.getEditorSettings(document.uri);
+    const data = document.getData();
+    if (settings.maxFileSizeMb > 0 && data.byteLength > settings.maxFileSizeMb * 1024 * 1024) {
+      await panel.webview.postMessage({
+        type: 'loadError',
+        message: `Database is ${(data.byteLength / 1024 / 1024).toFixed(1)} MB, above the configured ${settings.maxFileSizeMb} MB WebAssembly load limit. Raise databaseEditor.maxFileSizeMb or set it to 0 to open this file.`,
+        settings,
+      });
+      return;
+    }
+
     await panel.webview.postMessage({
       type: 'loadDatabase',
       name: vscode.workspace.asRelativePath(document.uri),
-      data: toArrayBuffer(document.getData()),
+      data: toArrayBuffer(data),
+      settings,
     });
   }
 
@@ -281,6 +305,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
         type: 'loadDatabase',
         name: vscode.workspace.asRelativePath(document.uri),
         data: toArrayBuffer(snapshot),
+        settings: this.getEditorSettings(document.uri),
       });
     };
     await applySnapshotDocumentChange({
@@ -290,7 +315,23 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       emitEdit: (event) => this.changeEmitter.fire(event),
       postSnapshot,
       postAfterApply: refreshPanels,
+      maxUndoMemoryBytes: this.getEditorSettings(document.uri).maxUndoMemoryBytes,
     });
+  }
+
+  private getEditorSettings(uri: vscode.Uri): EditorSettings {
+    const configuration = vscode.workspace.getConfiguration('databaseEditor', uri);
+    return {
+      maxFileSizeMb: configuration.get('maxFileSizeMb', 200),
+      defaultPageSize: configuration.get('defaultPageSize', 500),
+      maxRows: configuration.get('maxRows', 0),
+      instantCommit: configuration.get<EditorSettings['instantCommit']>('instantCommit', 'never'),
+      doubleClickBehavior: configuration.get<EditorSettings['doubleClickBehavior']>('doubleClickBehavior', 'inline'),
+      blobExportMode: configuration.get<EditorSettings['blobExportMode']>('blobExportMode', 'native'),
+      queryTimeoutMs: configuration.get('queryTimeoutMs', 30_000),
+      maxUndoMemoryBytes: configuration.get('maxUndoMemoryBytes', 52_428_800),
+      isRemote: uri.scheme !== 'file',
+    };
   }
 
   private async postToDocumentPanels(document: SqliteDocument, message: ExtensionMessage): Promise<void> {
@@ -409,9 +450,23 @@ type WebviewMessage =
   | SaveBinaryMessage;
 
 type ExtensionMessage =
-  | { type: 'loadDatabase'; name: string; data: ArrayBuffer }
+  | { type: 'loadDatabase'; name: string; data: ArrayBuffer; settings: EditorSettings }
+  | { type: 'loadError'; message: string; settings: EditorSettings }
+  | { type: 'settingsChanged'; settings: EditorSettings }
   | { type: 'databaseSaved' }
   | { type: 'clipboardText'; requestId: string; text: string };
+
+interface EditorSettings {
+  maxFileSizeMb: number;
+  defaultPageSize: number;
+  maxRows: number;
+  instantCommit: 'always' | 'never' | 'remote-only';
+  doubleClickBehavior: 'inline' | 'modal';
+  blobExportMode: 'native' | 'web';
+  queryTimeoutMs: number;
+  maxUndoMemoryBytes: number;
+  isRemote: boolean;
+}
 
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(data.byteLength);

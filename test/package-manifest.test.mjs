@@ -36,3 +36,28 @@ test('schema context tool manifest exposes pagination inputs', () => {
   assert.equal(properties.limit.type, 'number');
   assert.match(properties.limit.description, /objects|page/i);
 });
+
+test('editor configuration exposes browsing, editing, persistence, and resource limits', () => {
+  const properties = manifest.contributes.configuration.properties;
+  const expected = {
+    'databaseEditor.maxFileSizeMb': 200,
+    'databaseEditor.defaultPageSize': 500,
+    'databaseEditor.maxRows': 0,
+    'databaseEditor.instantCommit': 'never',
+    'databaseEditor.doubleClickBehavior': 'inline',
+    'databaseEditor.blobExportMode': 'native',
+    'databaseEditor.queryTimeoutMs': 30000,
+    'databaseEditor.maxUndoMemoryBytes': 52428800,
+  };
+
+  for (const [name, defaultValue] of Object.entries(expected)) {
+    assert.equal(properties[name].default, defaultValue, `${name} default`);
+    assert.equal(properties[name].scope, 'resource');
+  }
+
+  assert.deepEqual(properties['databaseEditor.instantCommit'].enum, ['always', 'never', 'remote-only']);
+  assert.deepEqual(properties['databaseEditor.doubleClickBehavior'].enum, ['inline', 'modal']);
+  assert.deepEqual(properties['databaseEditor.blobExportMode'].enum, ['native', 'web']);
+  assert.match(properties['databaseEditor.maxFileSizeMb'].markdownDescription, /WASM/i);
+  assert.match(properties['databaseEditor.maxRows'].markdownDescription, /0 = unlimited/i);
+});

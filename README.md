@@ -26,8 +26,8 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 1. Open any SQLite database file (`.db`, `.sqlite`, etc.) in VS Code.
 2. The custom editor launches automatically — browse tables in the sidebar.
 3. Click a table to view its data in the paged grid.
-4. Click any cell to edit its value, or use the Actions column to add/delete rows.
-5. Press `Ctrl+S` (`Cmd+S` on macOS) or click the Save button to persist changes.
+4. Click once to select a cell, double-click to edit it, or use the row Actions column for row-level editing.
+5. Press `Ctrl+S` (`Cmd+S` on macOS) or click the Save button to persist changes unless `databaseEditor.instantCommit` is enabled.
 
 ### Schema tools
 
@@ -89,6 +89,40 @@ Query rows are processed inside the extension host and sent to the language mode
 - `databaseEditor.copilot.sensitiveColumnPatterns` configures case-insensitive regular expressions used for value redaction.
 
 SQLite runs in-process, so cancellation and timeout checks occur between SQLite result steps; they cannot interrupt a single long native/WASM step. Set `databaseEditor.copilot.accessMode` to `rw` only when you intend to review and confirm database changes.
+
+## Keyboard shortcuts / mouse actions
+
+These shortcuts apply while focus is inside the SQLite custom editor. Text fields keep native copy/paste/undo behavior, while grid shortcuts operate on the current cell or selected visible rows.
+
+| Shortcut | Action |
+| --- | --- |
+| Single-click | Select the focused cell or row |
+| Double-click | Edit the cell using `databaseEditor.doubleClickBehavior` (`inline` by default; read-only/BLOB cells use the row modal) |
+| Enter | Save an inline cell edit |
+| Shift+Enter | Insert a newline while editing inline text |
+| Escape | Cancel an inline edit, or clear the current grid selection |
+| Ctrl+C / Cmd+C | Copy the selected grid cell; use **Copy rows as…** for selected/visible row copy formats |
+| Ctrl+Z / Cmd+Z | Undo the last database edit through VS Code's custom-editor undo stack |
+| Ctrl+Y / Cmd+Shift+Z | Redo the last undone database edit |
+| Ctrl+S / Cmd+S | Save the database through VS Code's normal Save command |
+| Ctrl+Delete / Cmd+Delete | Smart delete: delete selected rows, delete the selected row, or clear the selected editable cell |
+| Shift+Click | Select a visible row range for batch copy/delete |
+| Ctrl+Click / Cmd+Click | Add or remove visible rows from the current batch selection |
+
+## Configuration
+
+Settings use the extension's actual `databaseEditor.*` namespace. They can be set globally, per workspace, or per resource where VS Code supports resource-scoped settings.
+
+| Setting | Default | Description |
+| --- | ---: | --- |
+| `databaseEditor.maxFileSizeMb` | `200` | Maximum SQLite file size, in MB, loaded by the WebAssembly editor backend (`0` = unlimited). The current editor uses the WASM/sql.js backend. |
+| `databaseEditor.defaultPageSize` | `500` | Rows per page when a database opens. The pager also offers common sizes and includes custom defaults. |
+| `databaseEditor.maxRows` | `0` | Maximum browsable rows per table/view after filtering (`0` = unlimited). Paging still applies within the cap. |
+| `databaseEditor.instantCommit` | `never` | Auto-save strategy after grid, schema, or SQL writes: `always`, `never`, or `remote-only`. Manual Save remains available in every mode. |
+| `databaseEditor.doubleClickBehavior` | `inline` | Cell double-click action: `inline` for scalar grid editing, or `modal` for the row editor. |
+| `databaseEditor.blobExportMode` | `native` | BLOB export method: `native` uses VS Code's save dialog/filesystem APIs; `web` uses a webview download link. |
+| `databaseEditor.queryTimeoutMs` | `30000` | Soft query time budget for grid browsing and row-stepped reads. SQLite/WASM can only check this between statement steps, not during a single long SQLite step. |
+| `databaseEditor.maxUndoMemoryBytes` | `52428800` | Maximum combined before/after snapshot bytes retained for a single undoable edit. Larger edits still mark the database dirty but skip per-edit undo snapshots to avoid excessive memory use. |
 
 ## Requirements
 

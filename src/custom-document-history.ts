@@ -12,6 +12,14 @@ export interface SnapshotEditEvent<T extends SnapshotDocument> {
   redo(): PromiseLike<void> | void;
 }
 
+export interface SnapshotContentChangeEvent<T extends SnapshotDocument> {
+  readonly document: T;
+}
+
+export type SnapshotChangeEvent<T extends SnapshotDocument> =
+  | SnapshotEditEvent<T>
+  | SnapshotContentChangeEvent<T>;
+
 export function cloneData(data: Uint8Array): Uint8Array {
   const copy = new Uint8Array(data.byteLength);
   copy.set(data);
@@ -25,13 +33,15 @@ export async function applySnapshotDocumentChange<T extends SnapshotDocument>({
   emitEdit,
   postSnapshot,
   postAfterApply = false,
+  maxUndoMemoryBytes = Number.POSITIVE_INFINITY,
 }: {
   document: T;
   data: Uint8Array;
   label?: string;
-  emitEdit: (event: SnapshotEditEvent<T>) => void;
+  emitEdit: (event: SnapshotChangeEvent<T>) => void;
   postSnapshot: SnapshotPost;
   postAfterApply?: boolean;
+  maxUndoMemoryBytes?: number;
 }): Promise<void> {
   const before = cloneData(document.getData());
   const after = cloneData(data);
@@ -41,7 +51,16 @@ export async function applySnapshotDocumentChange<T extends SnapshotDocument>({
   }
 
   document.updateData(cloneData(after));
-  emitEdit(createSnapshotEditEvent({ document, before, after, label, postSnapshot }));
+  if (shouldKeepUndoSnapshots(before, after, maxUndoMemoryBytes)) {
+    emitEdit(createSnapshotEditEvent({ document, before, after, label, postSnapshot }));
+  } else {
+    emitEdit({ document });
+  }
+}
+
+function shouldKeepUndoSnapshots(before: Uint8Array, after: Uint8Array, maxUndoMemoryBytes: number): boolean {
+  const budget = Number(maxUndoMemoryBytes);
+  return !Number.isFinite(budget) || budget <= 0 || before.byteLength + after.byteLength <= budget;
 }
 
 export function createSnapshotEditEvent<T extends SnapshotDocument>({

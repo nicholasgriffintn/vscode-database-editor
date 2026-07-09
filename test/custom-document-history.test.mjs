@@ -122,3 +122,32 @@ test('cloneData returns an independent Uint8Array copy', () => {
 
   assert.deepEqual([...copy], [7, 8]);
 });
+
+test('oversized snapshot changes fall back to content changes without retaining undo snapshots', async () => {
+  const events = [];
+  const posted = [];
+  const document = {
+    data: new Uint8Array([1, 2, 3]),
+    getData() {
+      return this.data;
+    },
+    updateData(data) {
+      this.data = data;
+    },
+  };
+
+  await applySnapshotDocumentChange({
+    document,
+    data: new Uint8Array([4, 5, 6, 7]),
+    label: 'Large edit',
+    emitEdit: (event) => events.push(event),
+    postSnapshot: (data) => posted.push([...data]),
+    maxUndoMemoryBytes: 6,
+  });
+
+  assert.deepEqual([...document.getData()], [4, 5, 6, 7]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].document, document);
+  assert.equal(typeof events[0].undo, 'undefined');
+  assert.deepEqual(posted, []);
+});

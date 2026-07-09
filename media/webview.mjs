@@ -1,3 +1,11 @@
+import {
+  DEFAULT_EDITOR_SETTINGS,
+  getBlobExportStrategy,
+  getDoubleClickEditMode,
+  getEffectiveRowWindow,
+  getInstantCommitAction,
+  normalizeEditorSettings,
+} from './editor-settings.mjs';
 import { createElement, clear } from './dom-utils.mjs';
 import {
   describeBlob,
@@ -107,11 +115,13 @@ let objectFilter = '';
 let sortColumn = null;
 let sortDirection = 'asc';
 let page = 1;
-let pageSize = 100;
+let editorSettings = normalizeEditorSettings(DEFAULT_EDITOR_SETTINGS);
+let pageSize = editorSettings.defaultPageSize;
 let totalRows = 0;
 let visibleRows = [];
 let selectedRow = null;
 let selectedCell = null;
+let lastSelectedRowIndex = null;
 let selectedRowKeys = new Set();
 let querySql = 'SELECT name, type FROM sqlite_schema ORDER BY type, name;';
 let queryHistory = normalizeQueryHistory(webviewState.queryHistory);
@@ -174,7 +184,16 @@ vscode.postMessage({ type: 'ready' });
 window.addEventListener('message', async (event) => {
   const message = event.data;
   if (message.type === 'loadDatabase') {
+    applyEditorSettings(message.settings, { resetPageSize: true });
     await openDatabase(message.name, message.data);
+  } else if (message.type === 'loadError') {
+    handleLoadError(message.message, message.settings);
+  } else if (message.type === 'settingsChanged') {
+    const oldMaxRows = editorSettings.maxRows;
+    applyEditorSettings(message.settings);
+    if (db && oldMaxRows !== editorSettings.maxRows) {
+      await refreshRows();
+    }
   } else if (message.type === 'databaseSaved') {
     handleDatabaseSaved();
   } else if (message.type === 'clipboardText') {
@@ -235,12 +254,7 @@ function buildShell() {
     attributes: { type: 'button', 'data-action': 'refresh-data', disabled: 'true' },
   });
   const pageSizeSelect = createElement('select', { className: 'page-size' });
-  for (const size of [50, 100, 250, 500]) {
-    pageSizeSelect.append(createElement('option', {
-      text: `${size} rows`,
-      attributes: { value: String(size), selected: size === pageSize ? 'selected' : undefined },
-    }));
-  }
+  renderPageSizeOptions(pageSizeSelect);
 
   const previousPage = createElement('button', {
     className: 'icon-button',
@@ -575,6 +589,7 @@ function buildShell() {
     nextPage,
     pageLabel,
     pageRowCount,
+    pageSizeSelect,
     addRow,
     exportCsv,
     exportSql,
@@ -622,11 +637,25 @@ function handleGlobalKeyDown(event) {
     return;
   }
 
+  if (event.key === 'Escape' && !document.querySelector('dialog[open]')) {
+    event.preventDefault();
+    event.stopPropagation();
+    clearGridSelection();
+    return;
+  }
+
   if (!event.metaKey && !event.ctrlKey) {
     return;
   }
 
   const key = event.key.toLowerCase();
+  if ((key === 'delete' || key === 'backspace') && !document.querySelector('dialog[open]')) {
+    event.preventDefault();
+    event.stopPropagation();
+    void smartDeleteSelection();
+    return;
+  }
+
   if (key === 'c' && !document.querySelector('dialog[open]')) {
     const selectedText = window.getSelection?.().toString() ?? '';
     if (!selectedText) {
@@ -779,6 +808,7 @@ async function openDatabase(name, data) {
     selectedRow = null;
     selectedCell = null;
     selectedRowKeys.clear();
+    lastSelectedRowIndex = null;
     page = 1;
     filter = '';
     pinnedRows.clear();
@@ -794,6 +824,69 @@ async function openDatabase(name, data) {
     updateSaveUi();
   } catch (error) {
     reportError(error);
+  }
+}
+
+function renderPageSizeOptions(select = elements?.pageSizeSelect) {
+  if (!select) {
+    return;
+  }
+  const sizes = [...new Set([50, 100, 250, 500, 1000, editorSettings.defaultPageSize])]
+    .filter((size) => Number.isInteger(size) && size > 0)
+    .sort((left, right) => left - right);
+  select.replaceChildren(...sizes.map((size) => createElement('option', {
+    text: `${size.toLocaleString()} rows`,
+    attributes: { value: String(size), selected: size === pageSize ? 'selected' : undefined },
+  })));
+  select.value = String(pageSize);
+}
+
+function applyEditorSettings(settings, { resetPageSize = false } = {}) {
+  const previousDefaultPageSize = editorSettings.defaultPageSize;
+  editorSettings = normalizeEditorSettings(settings);
+  if (resetPageSize || pageSize === previousDefaultPageSize) {
+    pageSize = editorSettings.defaultPageSize;
+    page = 1;
+  }
+  renderPageSizeOptions();
+}
+
+function handleLoadError(message, settings) {
+  applyEditorSettings(settings, { resetPageSize: true });
+  db?.close();
+  db = null;
+  tables = [];
+  schemaObjects = [];
+  activeTableName = null;
+  visibleRows = [];
+  totalRows = 0;
+  isDirty = false;
+  isSaving = false;
+  elements.title.textContent = 'SQLite database not opened';
+  elements.status.textContent = message;
+  elements.grid.replaceChildren(createElement('div', { className: 'error-state', text: message }));
+  renderSidebar();
+  renderSchema();
+  updatePager();
+  updateSaveUi();
+}
+
+function getQueryOptions() {
+  return { timeoutMs: editorSettings.queryTimeoutMs };
+}
+
+function buildAutoCommitStatusSuffix() {
+  return getInstantCommitAction({
+    strategy: editorSettings.instantCommit,
+    isRemote: editorSettings.isRemote,
+  }) === 'save'
+    ? ' · saving automatically'
+    : '';
+}
+
+function maybeAutoCommit() {
+  if (getInstantCommitAction({ strategy: editorSettings.instantCommit, isRemote: editorSettings.isRemote }) === 'save') {
+    window.setTimeout(() => requestSave(), 0);
   }
 }
 
@@ -855,6 +948,7 @@ async function refreshRows() {
   selectedRow = null;
   selectedCell = null;
   selectedRowKeys.clear();
+  lastSelectedRowIndex = null;
 
   if (!table) {
     totalRows = 0;
@@ -869,9 +963,15 @@ async function refreshRows() {
 
   try {
     const countQuery = buildTableCount({ tableName: table.name, columns: table.columns, filter, columnFilters });
-    totalRows = queryAll(db, countQuery.sql, countQuery.params)[0]?.count ?? 0;
-    const maxPage = Math.max(1, Math.ceil(totalRows / pageSize));
-    page = Math.min(page, maxPage);
+    const actualTotalRows = queryAll(db, countQuery.sql, countQuery.params, getQueryOptions())[0]?.count ?? 0;
+    const rowWindow = getEffectiveRowWindow({
+      totalRows: actualTotalRows,
+      page,
+      pageSize,
+      maxRows: editorSettings.maxRows,
+    });
+    totalRows = rowWindow.effectiveTotalRows;
+    page = rowWindow.page;
     const selectQuery = buildTableSelect({
       tableName: table.name,
       columns: table.columns,
@@ -879,11 +979,11 @@ async function refreshRows() {
       columnFilters,
       sortColumn,
       sortDirection,
-      limit: pageSize,
-      offset: (page - 1) * pageSize,
+      limit: rowWindow.limit,
+      offset: rowWindow.offset,
       includeRowid: table.hasRowid,
     });
-    visibleRows = queryAll(db, selectQuery.sql, selectQuery.params).map((row) => ({
+    visibleRows = queryAll(db, selectQuery.sql, selectQuery.params, getQueryOptions()).map((row) => ({
       identity: buildIdentity(table, row),
       values: row,
     }));
@@ -1696,6 +1796,35 @@ function rememberRenderedColumnWidths() {
   }
 }
 
+function toggleRowSelection(rowIndex, { range = false, additive = true } = {}) {
+  if (!Number.isInteger(rowIndex) || !visibleRows[rowIndex]) {
+    return;
+  }
+
+  if (range && Number.isInteger(lastSelectedRowIndex) && visibleRows[lastSelectedRowIndex]) {
+    const start = Math.min(lastSelectedRowIndex, rowIndex);
+    const end = Math.max(lastSelectedRowIndex, rowIndex);
+    if (!additive) {
+      selectedRowKeys.clear();
+    }
+    for (let index = start; index <= end; index += 1) {
+      selectedRowKeys.add(getRowSelectionKey(visibleRows[index].identity));
+    }
+  } else {
+    const key = getRowSelectionKey(visibleRows[rowIndex].identity);
+    if (selectedRowKeys.has(key)) {
+      selectedRowKeys.delete(key);
+    } else {
+      if (!additive) {
+        selectedRowKeys.clear();
+      }
+      selectedRowKeys.add(key);
+    }
+  }
+  lastSelectedRowIndex = rowIndex;
+  postCopilotSelectionContext();
+}
+
 function selectGridRow(rowIndex) {
   selectedRow = rowIndex;
   selectedCell = null;
@@ -1721,6 +1850,46 @@ function selectGridCell(rowIndex, columnName) {
 function clearSelectedRows() {
   selectedRowKeys.clear();
   updateSelectionUi();
+}
+
+function clearGridSelection() {
+  selectedRow = null;
+  selectedCell = null;
+  selectedRowKeys.clear();
+  lastSelectedRowIndex = null;
+  const gridEl = elements.grid.querySelector('.data-grid');
+  gridEl?.querySelectorAll('.selected-row, .selected-cell, .multi-selected-row').forEach((element) => {
+    element.classList.remove('selected-row', 'selected-cell', 'multi-selected-row');
+  });
+  renderGrid();
+  postCopilotSelectionContext();
+}
+
+async function smartDeleteSelection() {
+  const selectedRows = getVisibleSelectedRows();
+  if (selectedRows.length > 0) {
+    await deleteRows(selectedRows, { confirm: true });
+    return;
+  }
+
+  const table = getEditableTable();
+  if (!table) {
+    return;
+  }
+
+  if (selectedCell) {
+    const row = visibleRows[selectedCell.rowIndex];
+    const column = table.columns.find((candidate) => candidate.name === selectedCell.columnName);
+    if (row && column && !column.primaryKeyOrder && !(row.values[column.name] instanceof Uint8Array)) {
+      await updateCell(table, row, column, null, row.values[column.name]);
+      elements.status.textContent = `Cleared ${column.name}${buildAutoCommitStatusSuffix()}`;
+    }
+    return;
+  }
+
+  if (selectedRow !== null) {
+    await deleteRows([visibleRows[selectedRow]].filter(Boolean), { confirm: true });
+  }
 }
 
 function getVisibleSelectedRows() {
@@ -1831,12 +2000,7 @@ async function handleClick(event) {
     const rowIndex = Number(selectRow.dataset.selectRow);
     const row = visibleRows[rowIndex];
     if (row) {
-      const key = getRowSelectionKey(row.identity);
-      if (selectedRowKeys.has(key)) {
-        selectedRowKeys.delete(key);
-      } else {
-        selectedRowKeys.add(key);
-      }
+      toggleRowSelection(rowIndex, { range: event.shiftKey, additive: true });
       selectGridRow(rowIndex);
       renderGrid();
     }
@@ -1893,13 +2057,27 @@ async function handleClick(event) {
 
   const gridCell = event.target.closest('[data-grid-cell-row]');
   if (gridCell) {
-    selectGridCell(Number(gridCell.dataset.gridCellRow), gridCell.dataset.gridCellColumn);
+    const rowIndex = Number(gridCell.dataset.gridCellRow);
+    if (event.shiftKey || event.metaKey || event.ctrlKey) {
+      toggleRowSelection(rowIndex, { range: event.shiftKey, additive: event.metaKey || event.ctrlKey || event.shiftKey });
+      selectGridRow(rowIndex);
+      renderGrid();
+      return;
+    }
+    selectGridCell(rowIndex, gridCell.dataset.gridCellColumn);
     return;
   }
 
   const row = event.target.closest('tr[data-row]');
   if (row) {
-    selectGridRow(Number(row.dataset.row));
+    const rowIndex = Number(row.dataset.row);
+    if (event.shiftKey || event.metaKey || event.ctrlKey) {
+      toggleRowSelection(rowIndex, { range: event.shiftKey, additive: event.metaKey || event.ctrlKey || event.shiftKey });
+      selectGridRow(rowIndex);
+      renderGrid();
+      return;
+    }
+    selectGridRow(rowIndex);
     return;
   }
 }
@@ -1915,7 +2093,22 @@ function handleDoubleClick(event) {
     return;
   }
 
-  showRowDetails(Number(gridCell.dataset.gridCellRow), gridCell.dataset.gridCellColumn);
+  const rowIndex = Number(gridCell.dataset.gridCellRow);
+  const columnName = gridCell.dataset.gridCellColumn;
+  const table = getActiveTable();
+  const row = visibleRows[rowIndex];
+  const column = table?.columns.find((candidate) => candidate.name === columnName);
+  const canInlineEdit = Boolean(table?.type === 'table' && row && column && !column.primaryKeyOrder && !(row.values[column.name] instanceof Uint8Array));
+  const editMode = getDoubleClickEditMode({
+    behavior: editorSettings.doubleClickBehavior,
+    canInlineEdit,
+  });
+  if (editMode === 'inline') {
+    showInlineCellEditor(rowIndex, columnName);
+    return;
+  }
+
+  showRowDetails(rowIndex, columnName);
 }
 
 async function selectTable(tableName) {
@@ -2031,6 +2224,68 @@ function setActiveSchemaView(view) {
   elements.schemaGraphFit.classList.toggle('hidden', !graphActive);
   elements.schemaGraphLayout.classList.toggle('hidden', !graphActive);
   elements.schemaGraphSummary.classList.toggle('hidden', !graphActive);
+}
+
+function showInlineCellEditor(rowIndex, columnName) {
+  const table = getEditableTable();
+  const row = visibleRows[rowIndex];
+  const column = table?.columns.find((candidate) => candidate.name === columnName);
+  if (!table || !row || !column || column.primaryKeyOrder || row.values[column.name] instanceof Uint8Array) {
+    showRowDetails(rowIndex, columnName);
+    return;
+  }
+
+  const cell = elements.grid.querySelector(`[data-grid-cell-row="${CSS.escape(String(rowIndex))}"][data-grid-cell-column="${CSS.escape(columnName)}"]`);
+  if (!cell) {
+    return;
+  }
+
+  selectGridCell(rowIndex, columnName);
+  const previousValue = row.values[column.name];
+  const editor = createElement('textarea', {
+    className: 'inline-cell-editor',
+    attributes: {
+      rows: String(Math.max(1, Math.min(4, String(previousValue ?? '').split('\n').length))),
+      spellcheck: 'false',
+      'aria-label': `Edit ${columnName}`,
+    },
+  });
+  editor.value = previousValue === null || previousValue === undefined ? '' : String(previousValue);
+  let committed = false;
+
+  async function commit() {
+    if (committed) {
+      return;
+    }
+    committed = true;
+    await updateCell(table, row, column, editor.value, previousValue);
+  }
+
+  function cancel() {
+    if (committed) {
+      return;
+    }
+    committed = true;
+    renderGrid();
+  }
+
+  editor.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      void commit();
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      cancel();
+    }
+  });
+  editor.addEventListener('blur', cancel);
+  cell.replaceChildren(editor);
+  editor.focus();
+  editor.select();
 }
 
 function showRowDetails(rowIndex, initialColumnName = null) {
@@ -2356,6 +2611,20 @@ function createBlobPreview({ tableName, rowIndex, columnName, value, previewUrls
 function exportBlobValue({ tableName, rowIndex, columnName, value }) {
   const extension = getBlobFileExtension(value);
   const fileName = safeFileName(`${databaseName}-${tableName}-${rowIndex + 1}-${columnName}.${extension}`);
+  if (getBlobExportStrategy({ configured: editorSettings.blobExportMode }) === 'web') {
+    const mediaType = detectBlobMediaType(value) || 'application/octet-stream';
+    const url = URL.createObjectURL(new Blob([value], { type: mediaType }));
+    const link = createElement('a', {
+      attributes: { href: url, download: fileName },
+    });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    elements.status.textContent = `Downloaded ${fileName}`;
+    return;
+  }
+
   vscode.postMessage({
     type: 'saveBinary',
     kind: 'blob',
@@ -2959,7 +3228,7 @@ function exportSqlDump() {
       return {
         name: table.name,
         columns,
-        rows: queryAll(db, select.sql, select.params),
+        rows: queryAll(db, select.sql, select.params, getQueryOptions()),
       };
     });
 
@@ -2998,7 +3267,11 @@ function updatePager() {
     totalRows: table?.rowCount ?? totalRows,
   });
   elements.pageLabel.textContent = `${pager.label}`;
-  elements.pageRowCount.textContent = table ? `${table.rowCount.toLocaleString()} row${table.rowCount !== 1 ? 's' : ''} total` : '';
+  elements.pageRowCount.textContent = table
+    ? editorSettings.maxRows > 0 && table.rowCount > totalRows
+      ? `${totalRows.toLocaleString()} of ${table.rowCount.toLocaleString()} rows shown`
+      : `${table.rowCount.toLocaleString()} row${table.rowCount !== 1 ? 's' : ''} total`
+    : '';
   elements.previousPage.disabled = !pager.canGoPrevious;
   elements.nextPage.disabled = !pager.canGoNext;
   const editable = table?.type === 'table';
@@ -3037,6 +3310,7 @@ function markChanged() {
     label: 'Edit SQLite database',
     data: exported.buffer.slice(exported.byteOffset, exported.byteOffset + exported.byteLength),
   });
+  maybeAutoCommit();
 }
 
 function reportError(error) {

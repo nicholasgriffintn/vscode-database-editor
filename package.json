@@ -67,6 +67,100 @@
     "configuration": {
       "title": "SQLite Database Editor",
       "properties": {
+        "databaseEditor.maxFileSizeMb": {
+          "type": "number",
+          "default": 200,
+          "minimum": 0,
+          "markdownDescription": "Maximum SQLite file size, in MB, loaded by the WebAssembly editor backend. Set to `0` for unlimited. The current editor uses the WASM backend; future native streaming backends are not limited by this value.",
+          "scope": "resource"
+        },
+        "databaseEditor.defaultPageSize": {
+          "type": "integer",
+          "default": 500,
+          "minimum": 1,
+          "maximum": 10000,
+          "markdownDescription": "Default rows per page in the data grid when a database opens.",
+          "scope": "resource"
+        },
+        "databaseEditor.maxRows": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Maximum browsable rows per table/view after filtering (0 = unlimited). Paging still applies within this cap.",
+          "scope": "resource"
+        },
+        "databaseEditor.instantCommit": {
+          "type": "string",
+          "default": "never",
+          "enum": [
+            "always",
+            "never",
+            "remote-only"
+          ],
+          "enumItemLabels": [
+            "Always",
+            "Never",
+            "Remote Only"
+          ],
+          "markdownEnumDescriptions": [
+            "Automatically save the custom editor after every database change.",
+            "Keep edits in VS Code's dirty custom editor until the normal Save command runs.",
+            "Automatically save only for non-file URI schemes such as remote or virtual workspaces."
+          ],
+          "markdownDescription": "Controls whether grid, schema, and SQL workspace writes automatically run VS Code Save after marking the database dirty.",
+          "scope": "resource"
+        },
+        "databaseEditor.doubleClickBehavior": {
+          "type": "string",
+          "default": "inline",
+          "enum": [
+            "inline",
+            "modal"
+          ],
+          "enumItemLabels": [
+            "Inline",
+            "Modal"
+          ],
+          "markdownEnumDescriptions": [
+            "Edit editable scalar cells directly in the grid; BLOBs and read-only cells fall back to the row modal.",
+            "Open the row-detail modal on cell double-click."
+          ],
+          "markdownDescription": "Cell double-click action in the data grid.",
+          "scope": "resource"
+        },
+        "databaseEditor.blobExportMode": {
+          "type": "string",
+          "default": "native",
+          "enum": [
+            "native",
+            "web"
+          ],
+          "enumItemLabels": [
+            "Native VS Code Save Dialog",
+            "Webview Download"
+          ],
+          "markdownEnumDescriptions": [
+            "Use VS Code's native save dialog and workspace filesystem APIs for BLOB export.",
+            "Use a browser-style webview download link for BLOB export."
+          ],
+          "markdownDescription": "Controls how BLOB values are exported from row details.",
+          "scope": "resource"
+        },
+        "databaseEditor.queryTimeoutMs": {
+          "type": "integer",
+          "default": 30000,
+          "minimum": 100,
+          "maximum": 600000,
+          "markdownDescription": "Soft query time budget in milliseconds for grid browsing and row-stepped reads. SQLite/WASM can only check the timeout between statement steps, not while a single SQLite step is executing.",
+          "scope": "resource"
+        },
+        "databaseEditor.maxUndoMemoryBytes": {
+          "type": "integer",
+          "default": 52428800,
+          "minimum": 1024,
+          "markdownDescription": "Maximum combined before/after snapshot bytes retained for a single undoable database edit. Edits above this budget still mark the database dirty but skip per-edit undo snapshots to avoid excessive memory use.",
+          "scope": "resource"
+        },
         "databaseEditor.copilot.enable": {
           "type": "boolean",
           "default": true,
@@ -94,8 +188,17 @@
         },
         "databaseEditor.copilot.sensitiveColumnPatterns": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["password", "passwd", "token", "secret", "api[_-]?key", "ssn"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "password",
+            "passwd",
+            "token",
+            "secret",
+            "api[_-]?key",
+            "ssn"
+          ],
           "markdownDescription": "Case-insensitive regular expressions for columns whose query values are redacted before being returned to Copilot.",
           "scope": "window"
         },
@@ -178,10 +281,22 @@
         "id": "database-editor.sqlite-chat",
         "isSticky": true,
         "commands": [
-          { "name": "schema", "description": "Inspect the selected database object or schema" },
-          { "name": "query", "description": "Write or run a read-only SQLite query" },
-          { "name": "explain", "description": "Explain a read-only query plan" },
-          { "name": "profile", "description": "Profile the selected table or view" }
+          {
+            "name": "schema",
+            "description": "Inspect the selected database object or schema"
+          },
+          {
+            "name": "query",
+            "description": "Write or run a read-only SQLite query"
+          },
+          {
+            "name": "explain",
+            "description": "Explain a read-only query plan"
+          },
+          {
+            "name": "profile",
+            "description": "Profile the selected table or view"
+          }
         ],
         "disambiguation": [
           {
@@ -303,14 +418,31 @@
         "inputSchema": {
           "type": "object",
           "properties": {
-            "databaseUri": { "type": "string", "description": "Explicit open database URI." },
-            "query": { "type": "string", "description": "One read-only SELECT or safe WITH query." },
-            "queryName": { "type": "string", "description": "Short query name." }
+            "databaseUri": {
+              "type": "string",
+              "description": "Explicit open database URI."
+            },
+            "query": {
+              "type": "string",
+              "description": "One read-only SELECT or safe WITH query."
+            },
+            "queryName": {
+              "type": "string",
+              "description": "Short query name."
+            }
           },
-          "required": ["query", "queryName"]
+          "required": [
+            "query",
+            "queryName"
+          ]
         },
         "when": "config.databaseEditor.copilot.enable",
-        "tags": ["sqlite", "query", "analysis", "readonly"]
+        "tags": [
+          "sqlite",
+          "query",
+          "analysis",
+          "readonly"
+        ]
       },
       {
         "name": "databaseEditor_profile",
@@ -322,13 +454,26 @@
         "inputSchema": {
           "type": "object",
           "properties": {
-            "databaseUri": { "type": "string", "description": "Explicit open database URI." },
-            "objectName": { "type": "string", "description": "Table or view to profile." }
+            "databaseUri": {
+              "type": "string",
+              "description": "Explicit open database URI."
+            },
+            "objectName": {
+              "type": "string",
+              "description": "Table or view to profile."
+            }
           },
-          "required": ["objectName"]
+          "required": [
+            "objectName"
+          ]
         },
         "when": "config.databaseEditor.copilot.enable",
-        "tags": ["sqlite", "database", "analysis", "readonly"]
+        "tags": [
+          "sqlite",
+          "database",
+          "analysis",
+          "readonly"
+        ]
       },
       {
         "name": "databaseEditor_modify",
@@ -381,15 +526,40 @@
         "inputSchema": {
           "type": "object",
           "properties": {
-            "databaseUri": { "type": "string", "description": "Explicit open database URI." },
-            "statements": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50 },
-            "migrationName": { "type": "string", "description": "Short migration name." },
-            "migrationDescription": { "type": "string", "description": "What the migration changes and why." }
+            "databaseUri": {
+              "type": "string",
+              "description": "Explicit open database URI."
+            },
+            "statements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "migrationName": {
+              "type": "string",
+              "description": "Short migration name."
+            },
+            "migrationDescription": {
+              "type": "string",
+              "description": "What the migration changes and why."
+            }
           },
-          "required": ["statements", "migrationName", "migrationDescription"]
+          "required": [
+            "statements",
+            "migrationName",
+            "migrationDescription"
+          ]
         },
         "when": "config.databaseEditor.copilot.enable && config.databaseEditor.copilot.accessMode == rw",
-        "tags": ["sqlite", "database", "migration", "write"]
+        "tags": [
+          "sqlite",
+          "database",
+          "migration",
+          "write"
+        ]
       }
     ],
     "menus": {

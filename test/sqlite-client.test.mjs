@@ -104,6 +104,22 @@ test('rolls back batch writes when any statement fails', async () => {
   db.close();
 });
 
+test('queryAll enforces soft timeout between stepped rows', async () => {
+  const db = await createDatabase();
+  db.run('CREATE TABLE numbers (value INTEGER)');
+  db.run('INSERT INTO numbers (value) VALUES (1), (2), (3)');
+  let now = 0;
+
+  assert.throws(
+    () => queryAll(db, 'SELECT value FROM numbers ORDER BY value', [], {
+      timeoutMs: 1,
+      now: () => now += 1,
+    }),
+    /timed out after 1 ms/,
+  );
+  db.close();
+});
+
 test('runs read-only SQL scripts and reports unchanged result sets', async () => {
   const db = await createPeopleDatabase();
 

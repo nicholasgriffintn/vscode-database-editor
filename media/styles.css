@@ -733,6 +733,24 @@ button {
   outline-offset: -1px;
 }
 
+.inline-cell-editor {
+  display: block;
+  width: 100%;
+  min-width: 160px;
+  min-height: 34px;
+  margin: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--focus);
+  border-radius: 0;
+  outline: 0;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--vscode-editor-font-family), ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
 .null-cell .cell-button {
   color: var(--cell-null);
   font-style: italic;
