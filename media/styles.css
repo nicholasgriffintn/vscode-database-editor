@@ -287,6 +287,7 @@ button {
 .column-filter-input,
 .page-size,
 .copy-format,
+.query-history,
 .query-input,
 .row-field-input,
 .insert-field input,
@@ -303,6 +304,7 @@ button {
 .column-filter-input:focus,
 .page-size:focus,
 .copy-format:focus,
+.query-history:focus,
 .query-input:focus,
 .row-field-input:focus,
 .insert-field input:focus,
@@ -316,6 +318,7 @@ button {
 .column-filter-input,
 .page-size,
 .copy-format,
+.query-history,
 .row-field-input,
 .insert-field input,
 .insert-field select {
@@ -362,6 +365,7 @@ button {
 .toolbar-button:disabled,
 .icon-button:disabled,
 .copy-format:disabled,
+.query-history:disabled,
 .cell-button:disabled {
   cursor: default;
   opacity: 0.55;
@@ -885,13 +889,42 @@ tr.pinned-row .row-number-cell {
   gap: 0;
 }
 
+.query-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-1);
+}
+
 .query-input {
-  width: calc(100% - 16px);
+  width: 100%;
   min-height: 130px;
-  margin: 8px;
   padding: 8px;
   resize: vertical;
   font-family: var(--vscode-editor-font-family), monospace;
+}
+
+.query-history {
+  width: min(260px, 38vw);
+}
+
+.query-message {
+  min-height: 18px;
+  color: var(--muted);
+}
+
+.query-message.success {
+  color: var(--vscode-testing-iconPassed, #3fb950);
+}
+
+.query-message.warning {
+  color: var(--vscode-editorWarning-foreground, #d29922);
+}
+
+.query-message.error {
+  color: var(--vscode-errorForeground, #f14c4c);
 }
 
 .query-output {
@@ -941,8 +974,7 @@ tr.pinned-row .row-number-cell {
   margin-top: 6px;
 }
 
-.error-state,
-.query-message {
+.error-state {
   color: var(--vscode-errorForeground, #f14c4c);
 }
 

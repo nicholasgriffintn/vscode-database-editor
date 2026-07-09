@@ -107,19 +107,26 @@ export function parseCellInput(input, column, previousValue) {
   return input;
 }
 
+export function analyzeSqlScript(sql) {
+  const statements = splitSqlStatements(stripSqlComments(String(sql ?? '')));
+  const hasStatements = statements.length > 0;
+  const hasTransactionControl = statements.some(isTransactionControlStatement);
+  const mutates = statements.some((statement) => !isReadOnlyStatement(statement));
+
+  return {
+    statements,
+    statementCount: statements.length,
+    isEmpty: !hasStatements,
+    isReadOnly: hasStatements && !mutates,
+    mutates,
+    hasTransactionControl,
+    isMultiStatement: statements.length > 1,
+  };
+}
+
 export function isReadOnlyQuery(sql) {
-  const statements = splitSqlStatements(stripSqlComments(sql));
-  if (statements.length !== 1) {
-    return false;
-  }
-
-  const statement = statements[0].trim();
-  const normalized = statement.toLowerCase();
-  if (normalized.startsWith('select')) {
-    return true;
-  }
-
-  return normalized.startsWith('with') && !containsWriteKeyword(statement);
+  const analysis = analyzeSqlScript(sql);
+  return analysis.statementCount === 1 && analysis.isReadOnly;
 }
 
 export function describeValue(value) {
@@ -316,7 +323,7 @@ function stripSqlComments(sql) {
     if (quote) {
       output += current;
       if (current === quote) {
-        if (sql[index + 1] === quote) {
+        if (quote !== ']' && sql[index + 1] === quote) {
           output += sql[index + 1];
           index += 2;
           continue;
@@ -327,8 +334,8 @@ function stripSqlComments(sql) {
       continue;
     }
 
-    if (current === '\'' || current === '"') {
-      quote = current;
+    if (current === '\'' || current === '"' || current === '`' || current === '[') {
+      quote = current === '[' ? ']' : current;
       output += current;
       index += 1;
       continue;
@@ -347,7 +354,7 @@ function stripSqlComments(sql) {
       while (index < sql.length && !(sql[index] === '*' && sql[index + 1] === '/')) {
         index += 1;
       }
-      index += 2;
+      index = Math.min(sql.length, index + 2);
       output += ' ';
       continue;
     }
@@ -370,7 +377,7 @@ function splitSqlStatements(sql) {
     if (quote) {
       current += character;
       if (character === quote) {
-        if (sql[index + 1] === quote) {
+        if (quote !== ']' && sql[index + 1] === quote) {
           current += sql[index + 1];
           index += 1;
         } else {
@@ -380,8 +387,8 @@ function splitSqlStatements(sql) {
       continue;
     }
 
-    if (character === '\'' || character === '"') {
-      quote = character;
+    if (character === '\'' || character === '"' || character === '`' || character === '[') {
+      quote = character === '[' ? ']' : character;
       current += character;
       continue;
     }
@@ -404,8 +411,65 @@ function splitSqlStatements(sql) {
   return statements;
 }
 
+function isReadOnlyStatement(statement) {
+  const keyword = getLeadingKeyword(statement);
+  if (keyword === 'select' || keyword === 'values') {
+    return true;
+  }
+  if (keyword === 'with') {
+    return !containsWriteKeyword(statement);
+  }
+  if (keyword === 'explain') {
+    return true;
+  }
+  if (keyword === 'pragma') {
+    return isReadOnlyPragma(statement);
+  }
+  return false;
+}
+
+function isTransactionControlStatement(statement) {
+  return /^(?:begin(?:\s+(?:deferred|immediate|exclusive|transaction))?|commit|end|rollback|savepoint|release)\b/i.test(statement.trim());
+}
+
+function getLeadingKeyword(statement) {
+  return statement.trim().match(/^[a-z]+/i)?.[0].toLowerCase() ?? '';
+}
+
+const READ_ONLY_PRAGMAS = new Set([
+  'collation_list',
+  'compile_options',
+  'database_list',
+  'foreign_key_check',
+  'foreign_key_list',
+  'function_list',
+  'index_info',
+  'index_list',
+  'index_xinfo',
+  'integrity_check',
+  'module_list',
+  'pragma_list',
+  'quick_check',
+  'table_info',
+  'table_list',
+  'table_xinfo',
+]);
+
+function isReadOnlyPragma(statement) {
+  const match = statement.trim().match(/^pragma\s+(?:["'`\[]?[^\s."'`\]]+["'`\]]?\s*\.\s*)?["'`\[]?([\w-]+)["'`\]]?/i);
+  if (!match) {
+    return false;
+  }
+  const name = match[1].toLowerCase();
+  if (!READ_ONLY_PRAGMAS.has(name)) {
+    return false;
+  }
+  const remainder = statement.slice(match[0].length).trim();
+  return !remainder.startsWith('=');
+}
+
 function containsWriteKeyword(sql) {
-  const withoutStrings = sql.replace(/'([^']|'')*'|"([^"]|"")*"/g, ' ');
+  const withoutStrings = sql.replace(/'([^']|'')*'|"([^"]|"")*"|`([^`]|``)*`|\[[^\]]*\]/g, ' ');
   return /\b(insert|update|delete|drop|alter|create|replace|vacuum|attach|detach|pragma|reindex)\b/i.test(withoutStrings);
 }
 

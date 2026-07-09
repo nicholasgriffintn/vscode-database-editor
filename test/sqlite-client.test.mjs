@@ -9,8 +9,28 @@ import {
   hasRowid,
   queryAll,
   readTableMetadata,
+  runSqlScript,
   runWrite,
 } from '../media/sqlite-client.mjs';
+import { analyzeSqlScript } from '../media/sql-utils.mjs';
+
+async function createDatabase() {
+  const SQL = await initSqlJs({
+    locateFile: (file) => path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file),
+  });
+  return new SQL.Database();
+}
+
+async function createPeopleDatabase() {
+  const db = await createDatabase();
+  db.run('CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT UNIQUE)');
+  db.run("INSERT INTO people (name) VALUES ('Ada')");
+  return db;
+}
+
+function rows(db, sql) {
+  return db.exec(sql)[0]?.values ?? [];
+}
 
 test('discovers SQLite objects and table metadata', async () => {
   const db = await createDatabase();
@@ -55,9 +75,70 @@ test('rolls back failed writes', async () => {
   db.close();
 });
 
-async function createDatabase() {
-  const SQL = await initSqlJs({
-    locateFile: (file) => path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file),
-  });
-  return new SQL.Database();
-}
+test('runs read-only SQL scripts and reports unchanged result sets', async () => {
+  const db = await createPeopleDatabase();
+
+  const result = runSqlScript(db, 'SELECT name FROM people', analyzeSqlScript('SELECT name FROM people'));
+
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.results, [{ columns: ['name'], values: [['Ada']] }]);
+  db.close();
+});
+
+test('runs successful mutating SQL scripts inside an automatic transaction', async () => {
+  const db = await createPeopleDatabase();
+
+  const result = runSqlScript(db, "INSERT INTO people (name) VALUES ('Grace')", analyzeSqlScript("INSERT INTO people (name) VALUES ('Grace')"));
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.results, []);
+  assert.deepEqual(rows(db, 'SELECT name FROM people ORDER BY id'), [['Ada'], ['Grace']]);
+  db.close();
+});
+
+test('returns result sets from mixed mutating SQL scripts', async () => {
+  const db = await createPeopleDatabase();
+  const sql = "INSERT INTO people (name) VALUES ('Grace'); SELECT name FROM people ORDER BY id;";
+
+  const result = runSqlScript(db, sql, analyzeSqlScript(sql));
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.results, [{ columns: ['name'], values: [['Ada'], ['Grace']] }]);
+  db.close();
+});
+
+test('rolls back automatic transaction when a mutating SQL script fails', async () => {
+  const db = await createPeopleDatabase();
+  const sql = "INSERT INTO people (name) VALUES ('Grace'); INSERT INTO people (name) VALUES ('Ada');";
+
+  assert.throws(() => runSqlScript(db, sql, analyzeSqlScript(sql)), /UNIQUE constraint failed/);
+  assert.deepEqual(rows(db, 'SELECT name FROM people ORDER BY id'), [['Ada']]);
+  db.close();
+});
+
+test('does not wrap scripts that provide explicit transaction control', async () => {
+  const db = await createPeopleDatabase();
+  const sql = "BEGIN; INSERT INTO people (name) VALUES ('Grace'); COMMIT;";
+
+  const result = runSqlScript(db, sql, analyzeSqlScript(sql));
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(rows(db, 'SELECT name FROM people ORDER BY id'), [['Ada'], ['Grace']]);
+  db.close();
+});
+
+test('flags failed explicit transaction scripts when a prior commit may have changed the database', async () => {
+  const db = await createPeopleDatabase();
+  const sql = "BEGIN; INSERT INTO people (name) VALUES ('Grace'); COMMIT; SELECT * FROM missing_table;";
+
+  assert.throws(
+    () => runSqlScript(db, sql, analyzeSqlScript(sql)),
+    (error) => {
+      assert.match(error.message, /no such table: missing_table/);
+      assert.equal(error.databaseChanged, true);
+      return true;
+    },
+  );
+  assert.deepEqual(rows(db, 'SELECT name FROM people ORDER BY id'), [['Ada'], ['Grace']]);
+  db.close();
+});

@@ -1,4 +1,4 @@
-import { buildTableCount, quoteIdentifier } from './sql-utils.mjs';
+import { analyzeSqlScript, buildTableCount, quoteIdentifier } from './sql-utils.mjs';
 
 export function getSchemaObjects(db) {
   return queryAll(db, `
@@ -89,6 +89,50 @@ export function runWrite(db, sql, params = []) {
   } catch (error) {
     db.run('ROLLBACK');
     throw error;
+  }
+}
+
+export function runSqlScript(db, sql, analysis = analyzeSqlScript(sql)) {
+  if (analysis.isEmpty) {
+    return { results: [], changed: false };
+  }
+
+  if (!analysis.mutates) {
+    return { results: db.exec(sql), changed: false };
+  }
+
+  if (analysis.hasTransactionControl) {
+    try {
+      return { results: db.exec(sql), changed: true };
+    } catch (error) {
+      rollbackBestEffort(db);
+      markDatabaseChanged(error);
+      throw error;
+    }
+  }
+
+  db.run('BEGIN IMMEDIATE');
+  try {
+    const results = db.exec(sql);
+    db.run('COMMIT');
+    return { results, changed: true };
+  } catch (error) {
+    rollbackBestEffort(db);
+    throw error;
+  }
+}
+
+function markDatabaseChanged(error) {
+  if (error && typeof error === 'object') {
+    error.databaseChanged = true;
+  }
+}
+
+function rollbackBestEffort(db) {
+  try {
+    db.run('ROLLBACK');
+  } catch {
+    // The script may already have ended the transaction; preserve the original SQLite error.
   }
 }
 

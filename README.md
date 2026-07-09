@@ -10,13 +10,14 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 
 - **Open any SQLite file** — Supports `.db`, `.db3`, `.sqlite`, `.sqlite3`, `.sdb`, `.s3db`, and `.gpkg` files
 - **Browse database structure** — Tables, views, indexes, triggers, columns, primary and foreign keys in a clean sidebar
+- **Copilot integration** — Use Copilot Chat to inspect schema, run queries, and analyze tables with privacy-safe context
 - **Paged data grid** — Sort, filter, and paginate through table data with per-column search
 - **Inline editing** — Click any cell to edit its value, add new rows, or delete existing ones
 - **Image preview** — BLOB columns with PNG/JPEG/GIF/WebP images render as thumbnails inline
 - **Pin rows & columns** — Pin important columns to the left and mark rows for easy reference
 - **VS Code save integration** — Edits are tracked and saved using the normal `Ctrl+S` / `Cmd+S` flow with undo/redo support
 - **Schema management** — Create, rename, and drop tables; add and remove columns
-- **SQL query tab** — Run read-only SQL queries with a full result grid
+- **SQL workspace** — Run SELECTs, PRAGMAs, and multi-statement SQL scripts with result grids, query history, rollback-safe writes, and normal VS Code save tracking
 - **Export** — Export visible rows as CSV, or dump schema and table data as SQL
 - **Pure client-side** — Powered by [`sql.js`](https://github.com/sql-js/sql.js) (SQLite compiled to WebAssembly) — no native dependencies
 
@@ -28,9 +29,26 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 4. Click any cell to edit its value, or use the Actions column to add/delete rows.
 5. Press `Ctrl+S` (`Cmd+S` on macOS) or click the Save button to persist changes.
 
+### SQL workspace
+
+Use the SQL workspace to inspect data, run schema introspection, or apply manual SQLite changes against the editor's in-memory database copy. Successful write scripts mark the custom editor dirty and refresh the sidebar/grid; persist them with the normal VS Code save flow.
+
+The workspace supports:
+
+- Read-only `SELECT`, safe `WITH`, `VALUES`, `EXPLAIN`, and read-only PRAGMA statements.
+- Multi-statement scripts, including scripts that end with a result-producing query.
+- Mutating SQLite statements such as `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `ALTER`, and `DROP`.
+- Automatic transaction wrapping for mutating scripts without explicit transaction control, with rollback if a later statement fails.
+- User-managed transactions via `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, and `RELEASE` when you need explicit control.
+- Query history for recently executed scripts, available from the SQL workspace toolbar.
+
+If a script with explicit transaction control commits a change before a later statement fails, the workspace still marks the database as possibly changed and refreshes the UI so unsaved changes are not hidden.
+
 ### GitHub Copilot integration
 
 When GitHub Copilot Chat is installed, use `@sqlite`, its `/schema`, `/query`, `/explain`, and `/profile` commands, or the “Chat with SQLite Database” editor action. The participant keeps recent conversation turns and receives privacy-safe editor context: the active database, selected table/view, filters, and sort state. Grid row values are never included in that automatic context.
+
+![GitHub Copilot Chat integration demo](docs/copilot-demo.gif)
 
 Copilot tools can:
 
@@ -57,8 +75,6 @@ Query rows are processed inside the extension host and sent to the language mode
 
 SQLite runs in-process, so cancellation and timeout checks occur between SQLite result steps; they cannot interrupt a single long native/WASM step. Set `databaseEditor.copilot.accessMode` to `rw` only when you intend to review and confirm database changes.
 
-![GitHub Copilot Chat integration demo](docs/copilot-demo.gif)
-
 ## Requirements
 
 - VS Code 1.125.0 or later
@@ -67,7 +83,7 @@ SQLite runs in-process, so cancellation and timeout checks occur between SQLite 
 ## Known Limitations
 
 - Only SQLite databases are supported (other SQL databases planned for future releases)
-- The SQL query tab only allows `SELECT` statements (data editing is done through the grid)
+- SQL workspace changes run against the editor's in-memory copy until you save the custom editor
 
 ## License
 

@@ -4,6 +4,7 @@ import test from 'node:test';
 import initSqlJs from 'sql.js';
 
 import {
+  analyzeSqlScript,
   buildRowCopyContent,
   buildSqlDump,
   buildDelete,
@@ -115,13 +116,52 @@ test('parses edited values using declared column types', () => {
   assert.throws(() => parseCellInput('4.5ms', { name: 'score', type: 'REAL' }, ''), /expects a numeric/);
 });
 
-test('allows only SELECT statements in the query runner', () => {
+test('analyzes read-only SQL scripts without mutating flags', () => {
+  assert.deepEqual(analyzeSqlScript('SELECT * FROM people'), {
+    statements: ['SELECT * FROM people'],
+    statementCount: 1,
+    isEmpty: false,
+    isReadOnly: true,
+    mutates: false,
+    hasTransactionControl: false,
+    isMultiStatement: false,
+  });
+  assert.equal(analyzeSqlScript('/* inspect */ WITH visible AS (SELECT * FROM people) SELECT * FROM visible').isReadOnly, true);
+  assert.equal(analyzeSqlScript('-- comment\nSELECT 1').isReadOnly, true);
+  assert.equal(analyzeSqlScript('PRAGMA table_info(people)').isReadOnly, true);
+});
+
+test('analyzes mutating and transaction-controlled SQL scripts', () => {
+  assert.equal(analyzeSqlScript('UPDATE people SET name = "Ada"').mutates, true);
+
+  const mixed = analyzeSqlScript("INSERT INTO people(name) VALUES ('Ada'); SELECT * FROM people;");
+  assert.deepEqual(mixed.statements, ["INSERT INTO people(name) VALUES ('Ada')", 'SELECT * FROM people']);
+  assert.equal(mixed.mutates, true);
+  assert.equal(mixed.isMultiStatement, true);
+
+  const ddl = analyzeSqlScript('CREATE TABLE notes(id INTEGER); INSERT INTO notes VALUES (1);');
+  assert.equal(ddl.mutates, true);
+  assert.equal(ddl.statementCount, 2);
+
+  const explicitTransaction = analyzeSqlScript("BEGIN; UPDATE people SET name = 'Ada'; COMMIT;");
+  assert.equal(explicitTransaction.mutates, true);
+  assert.equal(explicitTransaction.hasTransactionControl, true);
+});
+
+test('analyzes SQL scripts without splitting comments or quoted semicolons', () => {
+  const analysis = analyzeSqlScript("-- comment ;\nINSERT INTO notes(body) VALUES ('hello; still one statement'); SELECT 'done; ok';");
+  assert.deepEqual(analysis.statements, [
+    "INSERT INTO notes(body) VALUES ('hello; still one statement')",
+    "SELECT 'done; ok'",
+  ]);
+  assert.equal(analysis.statementCount, 2);
+  assert.equal(analysis.mutates, true);
+});
+
+test('keeps read-only query compatibility wrapper for Copilot/tool callers', () => {
   assert.equal(isReadOnlyQuery('SELECT * FROM people'), true);
-  assert.equal(isReadOnlyQuery('/* inspect */ WITH visible AS (SELECT * FROM people) SELECT * FROM visible'), true);
-  assert.equal(isReadOnlyQuery('-- comment\nSELECT 1'), true);
   assert.equal(isReadOnlyQuery('WITH deleted AS (DELETE FROM people RETURNING *) SELECT * FROM deleted'), false);
-  assert.equal(isReadOnlyQuery('UPDATE people SET name = "Ada"'), false);
-  assert.equal(isReadOnlyQuery('SELECT * FROM people; DROP TABLE people'), false);
+  assert.equal(isReadOnlyQuery('SELECT * FROM people; SELECT 1'), false);
 });
 
 test('exports visible rows as standards-compatible CSV', () => {

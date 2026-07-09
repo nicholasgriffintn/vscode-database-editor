@@ -28,16 +28,23 @@ import {
   normalizeRowFieldValue,
   rowValuesEqual,
 } from './row-detail-ui.mjs';
+import {
+  addQueryHistoryEntry,
+  formatQueryHistoryLabel,
+  normalizeQueryHistory,
+} from './query-history.mjs';
 import { getDirtyStatusText, getSaveButtonState } from './save-state.mjs';
 import { getGridColumnCount, getGridEmptyStateKind } from './grid-empty-state.mjs';
 import {
   getSchemaObjects,
   queryAll,
   readTableMetadata,
+  runSqlScript,
   runStatement,
   runWrite,
 } from './sqlite-client.mjs';
 import {
+  analyzeSqlScript,
   buildRowCopyContent,
   buildSqlDump,
   buildDelete,
@@ -46,7 +53,6 @@ import {
   buildTableSelect,
   buildUpdate,
   describeValue,
-  isReadOnlyQuery,
   parseCellInput,
   toCsv,
 } from './sql-utils.mjs';
@@ -69,6 +75,7 @@ const ROW_COPY_FORMATS = [
 ];
 
 const vscode = acquireVsCodeApi();
+const webviewState = vscode.getState?.() ?? {};
 const app = document.querySelector('#app');
 const wasmUri = app.dataset.wasmUri;
 console.info('[SQLite Database Editor] loaded webview', {
@@ -94,7 +101,7 @@ let visibleRows = [];
 let selectedRow = null;
 let selectedCell = null;
 let querySql = 'SELECT name, type FROM sqlite_schema ORDER BY type, name;';
-let queryResults = [];
+let queryHistory = normalizeQueryHistory(webviewState.queryHistory);
 let schemaObjects = [];
 let isDirty = false;
 let isSaving = false;
@@ -337,6 +344,11 @@ function buildShell() {
     text: 'Run',
     attributes: { type: 'button', 'data-action': 'run-query' },
   });
+  const queryHistorySelect = createElement('select', {
+    className: 'query-history',
+    title: 'Load a previous SQL script',
+    attributes: { 'aria-label': 'Query history' },
+  });
   const queryMessage = createElement('div', { className: 'query-message' });
   const queryOutput = createElement('div', { className: 'query-output' });
   const query = createElement('section', {
@@ -351,14 +363,14 @@ function buildShell() {
               createElement('div', { className: 'schema-heading-title', text: 'SQL workspace' }),
               createElement('div', {
                 className: 'schema-heading-description',
-                text: 'Run read-only SELECT statements and inspect result sets without changing the database.',
+                text: 'Run SQL statements, inspect result sets, and save database changes when ready.',
               }),
             ],
           }),
-          createElement('div', { className: 'query-toolbar', children: [runQuery, queryMessage] }),
+          createElement('div', { className: 'query-toolbar', children: [queryHistorySelect, runQuery] }),
         ],
       }),
-      queryInput,
+      createElement('div', { className: 'query-editor', children: [queryInput, queryMessage] }),
       queryOutput,
     ],
   });
@@ -423,6 +435,15 @@ function buildShell() {
   queryInput.addEventListener('input', () => {
     querySql = queryInput.value;
   });
+  queryHistorySelect.addEventListener('change', () => {
+    const selectedIndex = Number(queryHistorySelect.value);
+    if (Number.isInteger(selectedIndex) && queryHistory[selectedIndex]) {
+      setQuerySql(queryHistory[selectedIndex]);
+      setQueryMessage('Loaded query from history.');
+    }
+    queryHistorySelect.value = '';
+  });
+  renderQueryHistory(queryHistorySelect);
   window.addEventListener('keydown', handleGlobalKeyDown, true);
 
   let resizeData = null;
@@ -503,6 +524,7 @@ function buildShell() {
     data,
     query,
     queryInput,
+    queryHistorySelect,
     queryMessage,
     queryOutput,
   };
@@ -1537,7 +1559,7 @@ async function runAction(action, sourceElement = null) {
       showInsertDialog();
       break;
     case 'run-query':
-      runReadOnlyQuery();
+      await runSqlWorkspace();
       break;
     case 'export-csv':
       exportVisibleCsv();
@@ -2286,28 +2308,112 @@ function readSchemaForm(form, fields) {
   }));
 }
 
-function runReadOnlyQuery() {
-  clear(elements.queryOutput);
-  elements.queryMessage.textContent = '';
+function setQuerySql(sql) {
+  querySql = sql;
+  elements.queryInput.value = sql;
+  elements.queryInput.focus();
+}
 
-  if (!isReadOnlyQuery(querySql)) {
-    elements.queryMessage.textContent = 'Only SELECT queries run from this tab.';
+function setQueryMessage(message, kind = 'info') {
+  elements.queryMessage.textContent = message;
+  elements.queryMessage.classList.remove('success', 'warning', 'error');
+  if (kind !== 'info') {
+    elements.queryMessage.classList.add(kind);
+  }
+}
+
+function recordQueryHistory(sql) {
+  const nextHistory = addQueryHistoryEntry(queryHistory, sql);
+  if (nextHistory === queryHistory || arraysEqual(nextHistory, queryHistory)) {
     return;
   }
 
+  queryHistory = nextHistory;
+  vscode.setState({
+    ...(vscode.getState?.() ?? {}),
+    queryHistory,
+  });
+  renderQueryHistory();
+}
+
+function renderQueryHistory(select = elements.queryHistorySelect) {
+  if (!select) {
+    return;
+  }
+
+  const placeholder = createElement('option', {
+    text: queryHistory.length === 0 ? 'No history yet' : 'Query history',
+    attributes: { value: '' },
+  });
+  select.replaceChildren(placeholder, ...queryHistory.map((sql, index) => createElement('option', {
+    text: formatQueryHistoryLabel(sql),
+    title: sql,
+    attributes: { value: String(index) },
+  })));
+  select.value = '';
+  select.disabled = queryHistory.length === 0;
+}
+
+function arraysEqual(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((item, index) => item === right[index]);
+}
+
+async function runSqlWorkspace() {
+  clear(elements.queryOutput);
+  setQueryMessage('');
+
+  if (!db) {
+    setQueryMessage('Open a database before running SQL.', 'warning');
+    return;
+  }
+
+  const analysis = analyzeSqlScript(querySql);
+  if (analysis.isEmpty) {
+    setQueryMessage('Enter a SQL statement to run.', 'warning');
+    return;
+  }
+
+  recordQueryHistory(querySql);
+
   try {
-    queryResults = db.exec(querySql);
-    if (queryResults.length === 0) {
-      elements.queryMessage.textContent = 'Query returned no rows.';
+    const { results, changed } = runSqlScript(db, querySql, analysis);
+    if (changed) {
+      markChanged();
+      await refreshTables();
+    }
+
+    const rowCount = results.reduce((sum, result) => sum + result.values.length, 0);
+    if (results.length > 0) {
+      setQueryMessage(changed
+        ? `${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'} · database modified`
+        : `${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'}`,
+      changed ? 'success' : 'info');
+      for (const result of results) {
+        elements.queryOutput.append(renderResultTable(result));
+      }
       return;
     }
 
-    elements.queryMessage.textContent = `${queryResults.reduce((sum, result) => sum + result.values.length, 0)} rows`;
-    for (const result of queryResults) {
-      elements.queryOutput.append(renderResultTable(result));
-    }
+    setQueryMessage(changed
+      ? `Executed ${analysis.statementCount.toLocaleString()} statement${analysis.statementCount === 1 ? '' : 's'} · database modified`
+      : 'Query returned no rows.',
+    changed ? 'success' : 'info');
   } catch (error) {
-    elements.queryMessage.textContent = getErrorMessage(error);
+    const message = getErrorMessage(error);
+    if (error?.databaseChanged) {
+      markChanged();
+      try {
+        await refreshTables();
+        setQueryMessage(`${message} · database may have changed`, 'error');
+      } catch (refreshError) {
+        setQueryMessage(`${message} · database may have changed; refresh failed: ${getErrorMessage(refreshError)}`, 'error');
+      }
+      return;
+    }
+    setQueryMessage(message, 'error');
   }
 }
 
