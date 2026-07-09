@@ -11,6 +11,7 @@ import {
   readTableMetadata,
   runSqlScript,
   runWrite,
+  runWriteBatch,
 } from '../media/sqlite-client.mjs';
 import { analyzeSqlScript } from '../media/sql-utils.mjs';
 
@@ -72,6 +73,34 @@ test('rolls back failed writes', async () => {
   db.run('CREATE TABLE people (name TEXT NOT NULL)');
   assert.throws(() => runWrite(db, 'INSERT INTO people (name) VALUES (?)', [null]), /NOT NULL/);
   assert.deepEqual(queryAll(db, 'SELECT * FROM people'), []);
+  db.close();
+});
+
+test('runs multiple generated writes in one transaction', async () => {
+  const db = await createDatabase();
+  db.run('CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
+  db.run('INSERT INTO people (name) VALUES (?), (?), (?)', ['Ada', 'Grace', 'Katherine']);
+
+  runWriteBatch(db, [
+    { sql: 'DELETE FROM people WHERE name = ?', params: ['Ada'] },
+    { sql: 'DELETE FROM people WHERE name = ?', params: ['Grace'] },
+  ]);
+
+  assert.deepEqual(queryAll(db, 'SELECT name FROM people ORDER BY id').map((row) => row.name), ['Katherine']);
+  db.close();
+});
+
+test('rolls back batch writes when any statement fails', async () => {
+  const db = await createDatabase();
+  db.run('CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)');
+  db.run('INSERT INTO people (name) VALUES (?), (?)', ['Ada', 'Grace']);
+
+  assert.throws(() => runWriteBatch(db, [
+    { sql: 'DELETE FROM people WHERE name = ?', params: ['Ada'] },
+    { sql: 'INSERT INTO people (name) VALUES (?)', params: ['Grace'] },
+  ]), /UNIQUE/);
+
+  assert.deepEqual(queryAll(db, 'SELECT name FROM people ORDER BY id').map((row) => row.name), ['Ada', 'Grace']);
   db.close();
 });
 

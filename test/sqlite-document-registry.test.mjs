@@ -18,6 +18,9 @@ test('registry stores privacy-safe selection context for the active database', (
     columnFilters: { team: 'Computing' },
     sortColumn: 'name',
     sortDirection: 'asc',
+    selectedRowCount: 2,
+    selectedRowNumbers: [1, 3],
+    selectedRowScope: 'visibleRows',
   });
 
   assert.deepEqual(registry.getSelectionContext(), {
@@ -28,6 +31,9 @@ test('registry stores privacy-safe selection context for the active database', (
     columnFilters: { team: 'Computing' },
     sortColumn: 'name',
     sortDirection: 'asc',
+    selectedRowCount: 2,
+    selectedRowNumbers: [1, 3],
+    selectedRowScope: 'visibleRows',
   });
 });
 

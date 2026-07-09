@@ -75,6 +75,9 @@ test('participant grounds requests in selection context and provides native chat
         objectType: 'table',
         filter: 'hunter2',
         columnFilters: { password: 'secret-token' },
+        selectedRowCount: 2,
+        selectedRowNumbers: [1, 3],
+        selectedRowScope: 'visibleRows',
       }),
     },
     getAccessMode: () => 'rw',
@@ -109,6 +112,8 @@ test('participant grounds requests in selection context and provides native chat
   }, { isCancellationRequested: false });
 
   assert.match(sentMessages.messages[0].content, /people/);
+  assert.match(sentMessages.messages[0].content, /2 selected visible rows/);
+  assert.match(sentMessages.messages[0].content, /\[1,3\]/);
   assert.match(sentMessages.messages[0].content, /No row values or filter values are included/);
   assert.doesNotMatch(sentMessages.messages[0].content, /hunter2|secret-token/);
   assert.equal(sentMessages.messages.some((message) => message.content === 'Earlier question'), true);

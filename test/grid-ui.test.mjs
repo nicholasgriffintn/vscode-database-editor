@@ -13,6 +13,9 @@ import {
   getPinnedRowOffset,
   getRefreshButtonState,
   getRowActions,
+  getRowSelectionKey,
+  getSelectedVisibleRows,
+  getSelectAllRowsState,
   getTextEditingShortcutAction,
   shouldKeepKeyboardShortcutInField,
 } from '../media/grid-ui.mjs';
@@ -25,6 +28,8 @@ test('Copilot selection context includes grid state without row values', () => {
     sortColumn: 'name',
     sortDirection: 'desc',
     selectedColumns: ['name'],
+    selectedRowCount: 2,
+    selectedRowNumbers: [3, 5],
   }), {
     objectName: 'people',
     objectType: 'table',
@@ -33,6 +38,9 @@ test('Copilot selection context includes grid state without row values', () => {
     sortColumn: 'name',
     sortDirection: 'desc',
     selectedColumns: ['name'],
+    selectedRowCount: 2,
+    selectedRowNumbers: [3, 5],
+    selectedRowScope: 'visibleRows',
   });
 });
 
@@ -85,6 +93,58 @@ test('cell clipboard text preserves editable values and describes non-text value
   assert.equal(getCellClipboardText(42), '42');
   assert.equal(getCellClipboardText(null), '');
   assert.equal(getCellClipboardText(new Uint8Array([1, 2, 3])), '[BLOB 3 bytes]');
+});
+
+test('row selection keys prefer rowid and fall back to sorted primary keys', () => {
+  assert.equal(getRowSelectionKey({ rowid: 42, primaryKey: { id: 1 } }), 'rowid:42');
+  assert.equal(
+    getRowSelectionKey({ rowid: null, primaryKey: { b: 'two', a: 1 } }),
+    'pk:[["a",1],["b","two"]]',
+  );
+  assert.equal(
+    getRowSelectionKey({ rowid: null, primaryKey: { id: new Uint8Array([1, 2]) } }),
+    'pk:[["id",{"type":"blob","bytes":[1,2]}]]',
+  );
+});
+
+test('selected visible rows are returned in current visible order', () => {
+  const visibleRows = [
+    { identity: { rowid: 3, primaryKey: {} }, values: { id: 3 } },
+    { identity: { rowid: 1, primaryKey: {} }, values: { id: 1 } },
+    { identity: { rowid: 2, primaryKey: {} }, values: { id: 2 } },
+  ];
+
+  assert.deepEqual(
+    getSelectedVisibleRows({ visibleRows, selectedRowKeys: new Set(['rowid:2', 'rowid:3']) })
+      .map((row) => row.values.id),
+    [3, 2],
+  );
+});
+
+test('select-all state reports checked and indeterminate states for visible rows', () => {
+  const visibleRows = [
+    { identity: { rowid: 1, primaryKey: {} } },
+    { identity: { rowid: 2, primaryKey: {} } },
+  ];
+
+  assert.deepEqual(getSelectAllRowsState({ visibleRows, selectedRowKeys: new Set() }), {
+    checked: false,
+    indeterminate: false,
+    selectedVisibleCount: 0,
+    visibleCount: 2,
+  });
+  assert.deepEqual(getSelectAllRowsState({ visibleRows, selectedRowKeys: new Set(['rowid:1']) }), {
+    checked: false,
+    indeterminate: true,
+    selectedVisibleCount: 1,
+    visibleCount: 2,
+  });
+  assert.deepEqual(getSelectAllRowsState({ visibleRows, selectedRowKeys: new Set(['rowid:1', 'rowid:2']) }), {
+    checked: true,
+    indeterminate: false,
+    selectedVisibleCount: 2,
+    visibleCount: 2,
+  });
 });
 
 test('row actions are per-row and table-only', () => {

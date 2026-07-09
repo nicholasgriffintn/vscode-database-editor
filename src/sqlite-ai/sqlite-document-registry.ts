@@ -20,6 +20,9 @@ export type SqliteSelectionContext = {
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   selectedColumns?: string[];
+  selectedRowCount?: number;
+  selectedRowNumbers?: number[];
+  selectedRowScope?: 'visibleRows';
 };
 
 export type SqliteSelectionUpdate = Omit<SqliteSelectionContext, 'databaseUri'>;
@@ -97,6 +100,8 @@ export class SqliteDocumentRegistry<TDocument extends RegistrySqliteDocument> {
       entry.selection = {
         ...selection,
         columnFilters: selection.columnFilters ? { ...selection.columnFilters } : undefined,
+        ...(selection.selectedColumns ? { selectedColumns: [...selection.selectedColumns] } : {}),
+        ...(selection.selectedRowNumbers ? { selectedRowNumbers: [...selection.selectedRowNumbers] } : {}),
       };
     }
   }
@@ -112,6 +117,8 @@ export class SqliteDocumentRegistry<TDocument extends RegistrySqliteDocument> {
       databaseUri: document.uri.toString(),
       ...selection,
       columnFilters: selection?.columnFilters ? { ...selection.columnFilters } : undefined,
+      ...(selection?.selectedColumns ? { selectedColumns: [...selection.selectedColumns] } : {}),
+      ...(selection?.selectedRowNumbers ? { selectedRowNumbers: [...selection.selectedRowNumbers] } : {}),
     };
   }
 

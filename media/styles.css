@@ -716,9 +716,9 @@ button {
 
 /* === Row # column (sticky top-left corner) === */
 .row-number-header {
-  width: 52px;
-  min-width: 52px;
-  max-width: 52px;
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
   background: var(--surface-2);
 }
 
@@ -730,16 +730,23 @@ button {
 
 .row-number-header .column-header {
   justify-content: center;
+  gap: 6px;
   min-height: var(--grid-header-height);
-  padding: 8px 2px;
+  padding: 8px 4px;
+}
+
+.row-number-heading-label {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .row-number-cell {
-  width: 52px;
-  min-width: 52px;
-  max-width: 52px;
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
   padding: 0;
   background: var(--surface-0);
+  white-space: nowrap;
 }
 
 .data-grid td.row-number-cell {
@@ -749,11 +756,11 @@ button {
 }
 
 .row-number-button {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  width: 100%;
+  width: auto;
   height: 100%;
   min-height: 29px;
   padding: 6px 2px;
@@ -762,6 +769,7 @@ button {
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
+  vertical-align: middle;
 }
 
 .row-number-button:hover {
@@ -808,6 +816,34 @@ tr.pinned-row td {
 tr.pinned-row .row-number-cell {
   z-index: 20;
   background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.row-select-checkbox {
+  width: 13px;
+  height: 13px;
+  margin: 0 0 0 4px;
+  accent-color: var(--accent);
+  vertical-align: middle;
+}
+
+.row-number-header .row-select-checkbox {
+  margin-left: 0;
+}
+
+.multi-selected-row td {
+  background: rgba(14, 99, 156, 0.10);
+}
+
+.multi-selected-row td.row-number-cell,
+.multi-selected-row td.pinned,
+tr.pinned-row.multi-selected-row td,
+tr.pinned-row.multi-selected-row td.row-number-cell,
+.data-grid tr.multi-selected-row td.pinned-row-cell {
+  background: rgba(14, 99, 156, 0.16);
+}
+
+tr.pinned-row.multi-selected-row .row-number-cell {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 

@@ -19,6 +19,9 @@ import {
   getPinnedRowOffset,
   getRefreshButtonState,
   getRowActions,
+  getRowSelectionKey,
+  getSelectedVisibleRows,
+  getSelectAllRowsState,
   getTextEditingShortcutAction,
   shouldKeepKeyboardShortcutInField,
 } from './grid-ui.mjs';
@@ -48,6 +51,7 @@ import {
   runSqlScript,
   runStatement,
   runWrite,
+  runWriteBatch,
 } from './sqlite-client.mjs';
 import {
   analyzeSqlScript,
@@ -106,6 +110,7 @@ let totalRows = 0;
 let visibleRows = [];
 let selectedRow = null;
 let selectedCell = null;
+let selectedRowKeys = new Set();
 let querySql = 'SELECT name, type FROM sqlite_schema ORDER BY type, name;';
 let queryHistory = normalizeQueryHistory(webviewState.queryHistory);
 let schemaObjects = [];
@@ -269,7 +274,7 @@ function buildShell() {
   });
   const copyRowsFormat = createElement('select', {
     className: 'copy-format',
-    title: 'Copy selected row, or visible rows if no row is selected',
+    title: 'Copy selected rows, or visible rows if no rows are selected',
     attributes: { 'aria-label': 'Copy rows as format' },
   });
   copyRowsFormat.append(createElement('option', {
@@ -282,6 +287,12 @@ function buildShell() {
       attributes: { value: format.value },
     }));
   }
+  const deleteSelectedRows = createElement('button', {
+    className: 'toolbar-button danger',
+    text: 'Delete selected',
+    title: 'Delete selected rows',
+    attributes: { type: 'button', 'data-action': 'delete-selected-rows', disabled: 'true' },
+  });
   const grid = createElement('div', { className: 'grid-wrap' });
   const pager = createElement('footer', {
     className: 'grid-footer',
@@ -428,6 +439,7 @@ function buildShell() {
           exportSql,
           copyRowsFormat,
           addRow,
+          deleteSelectedRows,
         ],
       }),
       grid,
@@ -565,6 +577,7 @@ function buildShell() {
     exportCsv,
     exportSql,
     copyRowsFormat,
+    deleteSelectedRows,
     newTable,
     renameTable,
     addColumn,
@@ -763,6 +776,7 @@ async function openDatabase(name, data) {
     elements.title.textContent = name;
     selectedRow = null;
     selectedCell = null;
+    selectedRowKeys.clear();
     page = 1;
     filter = '';
     pinnedRows.clear();
@@ -838,6 +852,7 @@ async function refreshRows() {
   const table = getActiveTable();
   selectedRow = null;
   selectedCell = null;
+  selectedRowKeys.clear();
 
   if (!table) {
     totalRows = 0;
@@ -845,6 +860,7 @@ async function refreshRows() {
     elements.grid.replaceChildren(createElement('div', { className: 'empty-state', text: 'No tables found.' }));
     updatePager();
     updateRefreshUi();
+    updateSelectionUi();
     postCopilotSelectionContext();
     return;
   }
@@ -872,14 +888,18 @@ async function refreshRows() {
     renderGrid();
     updatePager();
   } catch (error) {
+    visibleRows = [];
     elements.grid.replaceChildren(createElement('div', { className: 'error-state', text: getErrorMessage(error) }));
   } finally {
     updateRefreshUi();
+    updateSelectionUi();
     postCopilotSelectionContext();
   }
 }
 
 function postCopilotSelectionContext() {
+  const selectedRows = getVisibleSelectedRows();
+  const selectedRowNumbers = selectedRows.map((row) => visibleRows.indexOf(row) + 1 + ((page - 1) * pageSize));
   vscode.postMessage({
     type: 'copilotSelectionChanged',
     context: getCopilotSelectionContext({
@@ -889,6 +909,8 @@ function postCopilotSelectionContext() {
       sortColumn,
       sortDirection,
       selectedColumns: selectedCell?.columnName ? [selectedCell.columnName] : [],
+      selectedRowCount: selectedRows.length,
+      selectedRowNumbers,
     }),
   });
 }
@@ -1258,13 +1280,26 @@ function renderGrid() {
   });
 
   // Row # column (sticky top-left corner)
+  const selectAllState = getSelectAllRowsState({ visibleRows, selectedRowKeys });
+  const selectAllCheckbox = createElement('input', {
+    className: 'row-select-checkbox',
+    title: selectAllState.checked ? 'Deselect visible rows' : 'Select visible rows',
+    attributes: {
+      type: 'checkbox',
+      'data-select-all-rows': 'true',
+      checked: selectAllState.checked ? 'true' : undefined,
+      disabled: visibleRows.length === 0 ? 'true' : undefined,
+      'aria-label': 'Select all visible rows',
+    },
+  });
   headerRow.append(createElement('th', {
     className: 'row-number-header',
     children: [
       createElement('div', {
         className: 'column-header',
         children: [
-          createElement('span', { className: 'column-name', text: '#' }),
+          selectAllCheckbox,
+          createElement('span', { className: 'column-name row-number-heading-label', text: '#' }),
         ],
       }),
     ],
@@ -1379,10 +1414,13 @@ function renderGrid() {
   for (const [rowIndex, row] of visibleRows.entries()) {
     const realRowIndex = (page - 1) * pageSize + rowIndex;
     const isRowPinned = pinnedRows.has(realRowIndex);
+    const rowSelectionKey = getRowSelectionKey(row.identity);
+    const isRowSelectedForBatch = selectedRowKeys.has(rowSelectionKey);
     const pinnedRowOffset = getPinnedRowOffset({ realRowIndex, visiblePinnedRows });
     const tr = createElement('tr', {
       className: [
         selectedRow === rowIndex ? 'selected-row' : '',
+        isRowSelectedForBatch ? 'multi-selected-row' : '',
         isRowPinned ? 'pinned-row' : '',
       ].filter(Boolean).join(' '),
       attributes: { 'data-row': String(rowIndex) },
@@ -1399,6 +1437,16 @@ function renderGrid() {
         zIndex: isRowPinned ? 20 : undefined,
       }),
       children: [
+        createElement('input', {
+          className: 'row-select-checkbox',
+          title: isRowSelectedForBatch ? 'Deselect row' : 'Select row',
+          attributes: {
+            type: 'checkbox',
+            'data-select-row': String(rowIndex),
+            checked: isRowSelectedForBatch ? 'true' : undefined,
+            'aria-label': `Select row ${realRowIndex + 1}`,
+          },
+        }),
         createElement('button', {
           className: 'row-number-button',
           attributes: { type: 'button', 'data-pin-row': String(rowIndex) },
@@ -1526,6 +1574,11 @@ function renderGrid() {
 
   tableElement.append(tbody);
   elements.grid.replaceChildren(tableElement);
+  const renderedSelectAll = elements.grid.querySelector('[data-select-all-rows]');
+  if (renderedSelectAll) {
+    renderedSelectAll.indeterminate = selectAllState.indeterminate;
+  }
+  updateSelectionUi();
   gridBlobUrls = gridBlobUrlsLocal;
 }
 
@@ -1659,6 +1712,26 @@ function selectGridCell(rowIndex, columnName) {
   postCopilotSelectionContext();
 }
 
+function clearSelectedRows() {
+  selectedRowKeys.clear();
+  updateSelectionUi();
+}
+
+function getVisibleSelectedRows() {
+  return getSelectedVisibleRows({ visibleRows, selectedRowKeys });
+}
+
+function updateSelectionUi() {
+  const selectedCount = getVisibleSelectedRows().length;
+  const table = getActiveTable();
+  if (elements.deleteSelectedRows) {
+    elements.deleteSelectedRows.disabled = !table || table.type !== 'table' || selectedCount === 0;
+    elements.deleteSelectedRows.textContent = selectedCount > 0
+      ? `Delete selected (${selectedCount.toLocaleString()})`
+      : 'Delete selected';
+  }
+}
+
 async function copyGridCell(rowIndex, columnName) {
   const row = visibleRows[rowIndex];
   if (!row) {
@@ -1676,8 +1749,9 @@ async function copyRows(format) {
     return;
   }
 
-  const selectedVisibleRow = Number.isInteger(selectedRow) ? visibleRows[selectedRow] : null;
-  const sourceRows = selectedVisibleRow ? [selectedVisibleRow] : visibleRows;
+  const selectedVisibleRows = getVisibleSelectedRows();
+  const usedSelection = selectedVisibleRows.length > 0;
+  const sourceRows = usedSelection ? selectedVisibleRows : visibleRows;
   const rows = sourceRows.map((row) => row.values);
   const columns = table.columns.map((column) => column.name);
   const content = buildRowCopyContent({
@@ -1688,7 +1762,9 @@ async function copyRows(format) {
   });
   await writeClipboardText(content);
   const label = ROW_COPY_FORMATS.find((item) => item.value === format)?.label ?? format;
-  elements.status.textContent = `Copied ${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'} as ${label}`;
+  elements.status.textContent = usedSelection
+    ? `Copied ${rows.length.toLocaleString()} selected ${rows.length === 1 ? 'row' : 'rows'} as ${label}`
+    : `Copied ${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'} as ${label}`;
 }
 
 async function writeClipboardText(text) {
@@ -1722,6 +1798,42 @@ async function handleClick(event) {
   const graphTable = event.target.closest('[data-schema-graph-table]');
   if (graphTable) {
     await selectTable(graphTable.dataset.schemaGraphTable);
+    return;
+  }
+
+  const selectAllRows = event.target.closest('[data-select-all-rows]');
+  if (selectAllRows) {
+    event.stopPropagation();
+    const state = getSelectAllRowsState({ visibleRows, selectedRowKeys });
+    if (state.checked || state.indeterminate) {
+      for (const row of visibleRows) {
+        selectedRowKeys.delete(getRowSelectionKey(row.identity));
+      }
+    } else {
+      for (const row of visibleRows) {
+        selectedRowKeys.add(getRowSelectionKey(row.identity));
+      }
+    }
+    renderGrid();
+    postCopilotSelectionContext();
+    return;
+  }
+
+  const selectRow = event.target.closest('[data-select-row]');
+  if (selectRow) {
+    event.stopPropagation();
+    const rowIndex = Number(selectRow.dataset.selectRow);
+    const row = visibleRows[rowIndex];
+    if (row) {
+      const key = getRowSelectionKey(row.identity);
+      if (selectedRowKeys.has(key)) {
+        selectedRowKeys.delete(key);
+      } else {
+        selectedRowKeys.add(key);
+      }
+      selectGridRow(rowIndex);
+      renderGrid();
+    }
     return;
   }
 
@@ -1841,6 +1953,9 @@ async function runAction(action, sourceElement = null) {
       break;
     case 'delete-row':
       await deleteRowAt(Number(sourceElement?.dataset.actionRow));
+      break;
+    case 'delete-selected-rows':
+      await deleteSelectedRows();
       break;
     case 'add-row':
       showInsertDialog();
@@ -2320,23 +2435,47 @@ async function updateCell(table, row, column, input, previousValue) {
 }
 
 async function deleteRowAt(rowIndex) {
-  const table = getActiveTable();
-  if (!table || Number.isNaN(rowIndex) || table.type === 'view') {
+  const row = visibleRows[rowIndex];
+  if (!row) {
     return;
   }
+  await deleteRows([row], { confirm: false });
+}
 
-  try {
-    const row = visibleRows[rowIndex];
+async function deleteSelectedRows() {
+  await deleteRows(getVisibleSelectedRows(), { confirm: true });
+}
+
+async function deleteRows(rows, { confirm = true } = {}) {
+  const table = getActiveTable();
+  if (!table || table.type === 'view' || rows.length === 0) {
+    return { deleted: false };
+  }
+
+  const count = rows.length;
+  if (confirm && !window.confirm(`Delete ${count.toLocaleString()} selected ${count === 1 ? 'row' : 'rows'}? This cannot be undone until you use VS Code Undo.`)) {
+    return { deleted: false };
+  }
+
+  const statements = rows.map((row) => {
     const deletion = buildDelete({
       tableName: table.name,
       identity: row.identity,
       primaryKeyColumns: table.primaryKeyColumns,
     });
-    runWrite(db, deletion.sql, deletion.params);
+    return { sql: deletion.sql, params: deletion.params };
+  });
+
+  try {
+    runWriteBatch(db, statements);
     markChanged();
+    clearSelectedRows();
     await refreshTables();
+    elements.status.textContent = `Deleted ${count.toLocaleString()} ${count === 1 ? 'row' : 'rows'}`;
+    return { deleted: true };
   } catch (error) {
     reportError(error);
+    return { deleted: false };
   }
 }
 
@@ -2811,6 +2950,7 @@ function updatePager() {
   elements.nextPage.disabled = !pager.canGoNext;
   const editable = table?.type === 'table';
   elements.addRow.disabled = !editable;
+  elements.deleteSelectedRows.disabled = !editable || getVisibleSelectedRows().length === 0;
   elements.renameTable.disabled = !editable;
   elements.addColumn.disabled = !editable;
   elements.dropColumn.disabled = !editable || table.columns.length === 0;

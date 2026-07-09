@@ -70,16 +70,34 @@ export function shouldKeepKeyboardShortcutInField({ key, metaKey, ctrlKey, shift
   return getTextEditingShortcutAction({ key, metaKey, ctrlKey, shiftKey, targetTagName }) !== null;
 }
 
-export function getCopilotSelectionContext({ table, filter, columnFilters, sortColumn, sortDirection, selectedColumns }) {
+export function getCopilotSelectionContext({
+  table,
+  filter,
+  columnFilters,
+  sortColumn,
+  sortDirection,
+  selectedColumns,
+  selectedRowCount = 0,
+  selectedRowNumbers = [],
+}) {
   const activeColumnFilters = Object.fromEntries(
     Object.entries(columnFilters ?? {}).filter(([, value]) => value !== ''),
   );
+  const rowCount = Number(selectedRowCount);
+  const rowNumbers = Array.isArray(selectedRowNumbers)
+    ? selectedRowNumbers.filter((value) => Number.isInteger(value) && value > 0)
+    : [];
   return {
     ...(table ? { objectName: table.name, objectType: table.type } : {}),
     ...(filter ? { filter } : {}),
     ...(Object.keys(activeColumnFilters).length > 0 ? { columnFilters: activeColumnFilters } : {}),
     ...(sortColumn ? { sortColumn, sortDirection } : {}),
     ...(selectedColumns?.length ? { selectedColumns: [...new Set(selectedColumns)] } : {}),
+    ...(rowCount > 0 ? {
+      selectedRowCount: rowCount,
+      selectedRowNumbers: rowNumbers,
+      selectedRowScope: 'visibleRows',
+    } : {}),
   };
 }
 
@@ -119,6 +137,42 @@ export function getCellClipboardText(value) {
     return `[BLOB ${value.length} bytes]`;
   }
   return String(value);
+}
+
+export function getRowSelectionKey(identity) {
+  if (identity?.rowid !== null && identity?.rowid !== undefined) {
+    return `rowid:${String(identity.rowid)}`;
+  }
+
+  const entries = Object.entries(identity?.primaryKey ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => [key, normalizeSelectionKeyValue(value)]);
+  return `pk:${JSON.stringify(entries)}`;
+}
+
+export function getSelectedVisibleRows({ visibleRows, selectedRowKeys }) {
+  return visibleRows.filter((row) => selectedRowKeys.has(getRowSelectionKey(row.identity)));
+}
+
+export function getSelectAllRowsState({ visibleRows, selectedRowKeys }) {
+  const visibleCount = visibleRows.length;
+  const selectedVisibleCount = getSelectedVisibleRows({ visibleRows, selectedRowKeys }).length;
+  return {
+    checked: visibleCount > 0 && selectedVisibleCount === visibleCount,
+    indeterminate: selectedVisibleCount > 0 && selectedVisibleCount < visibleCount,
+    selectedVisibleCount,
+    visibleCount,
+  };
+}
+
+function normalizeSelectionKeyValue(value) {
+  if (value instanceof Uint8Array) {
+    return { type: 'blob', bytes: Array.from(value) };
+  }
+  if (typeof value === 'bigint') {
+    return { type: 'bigint', value: String(value) };
+  }
+  return value;
 }
 
 export function getPinnedColumnLayout({

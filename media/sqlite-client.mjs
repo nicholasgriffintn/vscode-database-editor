@@ -92,6 +92,23 @@ export function runWrite(db, sql, params = []) {
   }
 }
 
+export function runWriteBatch(db, statements = []) {
+  if (statements.length === 0) {
+    return;
+  }
+
+  db.run('BEGIN IMMEDIATE');
+  try {
+    for (const statement of statements) {
+      runStatement(db, statement.sql, statement.params ?? []);
+    }
+    db.run('COMMIT');
+  } catch (error) {
+    db.run('ROLLBACK');
+    throw error;
+  }
+}
+
 export function runSqlScript(db, sql, analysis = analyzeSqlScript(sql)) {
   if (analysis.isEmpty) {
     return { results: [], changed: false };
