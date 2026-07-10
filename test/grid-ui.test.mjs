@@ -8,6 +8,8 @@ import {
   getDeleteRowsConfirmationMessage,
   getGridColumnStyle,
   getObjectItemInteraction,
+  getInfiniteRowWindow,
+  getInfiniteScrollState,
   getPagerState,
   getPinnedCellStyle,
   getPinnedColumnLayout,
@@ -175,6 +177,102 @@ test('pager state belongs to the bottom-right grid footer', () => {
   });
 });
 
+test('infinite pager reports the cumulative rows retained in the grid', () => {
+  assert.deepEqual(getPagerState({
+    autoPagination: true,
+    loadedRows: 200,
+    page: 1,
+    pageSize: 100,
+    filteredRows: 250,
+    totalRows: 1000,
+  }), {
+    label: 'Rows 1-200 of 250 filtered · 1000 total',
+    canGoPrevious: false,
+    canGoNext: true,
+  });
+});
+
+test('infinite scroll requests only the next chunk near the bottom', () => {
+  assert.deepEqual(getInfiniteScrollState({
+    autoPagination: true,
+    loadedRows: 500,
+    totalRows: 1_200,
+    isLoading: false,
+    scrollTop: 1_450,
+    clientHeight: 500,
+    scrollHeight: 2_000,
+  }), {
+    canLoadMore: true,
+    isNearBottom: true,
+    shouldLoadMore: true,
+  });
+
+  assert.equal(getInfiniteScrollState({
+    autoPagination: false,
+    loadedRows: 500,
+    totalRows: 1_200,
+    scrollTop: 1_450,
+    clientHeight: 500,
+    scrollHeight: 2_000,
+  }).shouldLoadMore, false);
+
+  assert.equal(getInfiniteScrollState({
+    autoPagination: true,
+    loadedRows: 1_200,
+    totalRows: 1_200,
+    scrollTop: 1_450,
+    clientHeight: 500,
+    scrollHeight: 2_000,
+  }).shouldLoadMore, false);
+
+  assert.equal(getInfiniteScrollState({
+    autoPagination: true,
+    loadedRows: 500,
+    totalRows: 1_200,
+    isLoading: true,
+    scrollTop: 1_450,
+    clientHeight: 500,
+    scrollHeight: 2_000,
+  }).shouldLoadMore, false);
+
+  assert.equal(getInfiniteScrollState({
+    autoPagination: true,
+    loadedRows: 500,
+    totalRows: 1_200,
+    isScrollingTowardBottom: false,
+    scrollTop: 1_450,
+    clientHeight: 500,
+    scrollHeight: 2_000,
+  }).shouldLoadMore, false);
+
+  assert.equal(getInfiniteScrollState({
+    autoPagination: true,
+    loadedRows: 500,
+    totalRows: 1_200,
+    scrollTop: 900,
+    clientHeight: 500,
+    scrollHeight: 2_000,
+  }).shouldLoadMore, false);
+});
+
+test('infinite row windows fetch only rows that have not already been loaded', () => {
+  assert.deepEqual(getInfiniteRowWindow({ loadedRows: 500, pageSize: 500, totalRows: 1_200 }), {
+    offset: 500,
+    limit: 500,
+    hasMore: true,
+  });
+  assert.deepEqual(getInfiniteRowWindow({ loadedRows: 1_000, pageSize: 500, totalRows: 1_200 }), {
+    offset: 1_000,
+    limit: 200,
+    hasMore: true,
+  });
+  assert.deepEqual(getInfiniteRowWindow({ loadedRows: 1_200, pageSize: 500, totalRows: 1_200 }), {
+    offset: 1_200,
+    limit: 0,
+    hasMore: false,
+  });
+});
+
 test('text editing shortcuts map to explicit input actions across webview fields', () => {
   assert.equal(getTextEditingShortcutAction({ key: 'a', metaKey: true, targetTagName: 'input' }), 'selectAll');
   assert.equal(getTextEditingShortcutAction({ key: 'c', ctrlKey: true, targetTagName: 'textarea' }), 'copy');
@@ -241,6 +339,7 @@ test('pinned columns get sequential sticky offsets after the row-number column',
 });
 
 test('pinned rows stack below both sticky header rows', () => {
+  assert.equal(getPinnedRowOffset({ pinnedIndex: 1 }), 123);
   assert.equal(getPinnedRowOffset({
     realRowIndex: 8,
     visiblePinnedRows: [3, 8, 12],

@@ -1,6 +1,7 @@
 export const DEFAULT_EDITOR_SETTINGS = Object.freeze({
   maxFileSizeMb: 200,
   defaultPageSize: 500,
+  autoPagination: true,
   maxRows: 0,
   instantCommit: 'never',
   doubleClickBehavior: 'inline',
@@ -19,6 +20,7 @@ export function normalizeEditorSettings(settings = {}) {
   return {
     maxFileSizeMb: normalizeNonNegativeNumber(source.maxFileSizeMb, DEFAULT_EDITOR_SETTINGS.maxFileSizeMb),
     defaultPageSize: normalizePositiveInteger(source.defaultPageSize, DEFAULT_EDITOR_SETTINGS.defaultPageSize),
+    autoPagination: typeof source.autoPagination === 'boolean' ? source.autoPagination : DEFAULT_EDITOR_SETTINGS.autoPagination,
     maxRows: normalizeNonNegativeInteger(source.maxRows, DEFAULT_EDITOR_SETTINGS.maxRows),
     instantCommit: INSTANT_COMMIT_VALUES.has(source.instantCommit) ? source.instantCommit : DEFAULT_EDITOR_SETTINGS.instantCommit,
     doubleClickBehavior: DOUBLE_CLICK_VALUES.has(source.doubleClickBehavior) ? source.doubleClickBehavior : DEFAULT_EDITOR_SETTINGS.doubleClickBehavior,

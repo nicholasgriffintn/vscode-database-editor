@@ -40,8 +40,19 @@ export function getRowActions({ tableType, rowIndex }) {
   ];
 }
 
-export function getPagerState({ page, pageSize, filteredRows, totalRows }) {
+export function getPagerState({ page, pageSize, filteredRows, totalRows, autoPagination = false, loadedRows = 0 }) {
   const visibleRows = filteredRows ?? totalRows;
+  if (autoPagination) {
+    const lastVisible = Math.min(Math.max(0, Number(loadedRows) || 0), visibleRows);
+    return {
+      label: totalRows === visibleRows
+        ? `Rows ${lastVisible === 0 ? 0 : 1}-${lastVisible} of ${visibleRows}`
+        : `Rows ${lastVisible === 0 ? 0 : 1}-${lastVisible} of ${visibleRows} filtered · ${totalRows} total`,
+      canGoPrevious: false,
+      canGoNext: lastVisible < visibleRows,
+    };
+  }
+
   const pageCount = Math.max(1, Math.ceil(visibleRows / pageSize));
   const firstVisible = visibleRows === 0 ? 0 : ((page - 1) * pageSize) + 1;
   const lastVisible = Math.min(page * pageSize, visibleRows);
@@ -51,6 +62,53 @@ export function getPagerState({ page, pageSize, filteredRows, totalRows }) {
       : `Rows ${firstVisible}-${lastVisible} of ${visibleRows} filtered · ${totalRows} total`,
     canGoPrevious: page > 1,
     canGoNext: page < pageCount,
+  };
+}
+
+export function getInfiniteScrollState({
+  autoPagination,
+  loadedRows,
+  totalRows,
+  isLoading = false,
+  isScrollingTowardBottom = true,
+  scrollTop,
+  clientHeight,
+  scrollHeight,
+  thresholdPx = 96,
+}) {
+  const normalizedLoadedRows = Math.max(0, Number(loadedRows) || 0);
+  const normalizedTotalRows = Math.max(0, Number(totalRows) || 0);
+  const normalizedScrollTop = Math.max(0, Number(scrollTop) || 0);
+  const normalizedClientHeight = Math.max(0, Number(clientHeight) || 0);
+  const normalizedScrollHeight = Math.max(0, Number(scrollHeight) || 0);
+  const normalizedThreshold = Math.max(0, Number(thresholdPx) || 0);
+  const canLoadMore = normalizedLoadedRows < normalizedTotalRows;
+  const remainingScroll = Math.max(0, normalizedScrollHeight - (normalizedScrollTop + normalizedClientHeight));
+  const isNearBottom = remainingScroll <= normalizedThreshold;
+
+  return {
+    canLoadMore,
+    isNearBottom,
+    shouldLoadMore: Boolean(autoPagination)
+      && !isLoading
+      && Boolean(isScrollingTowardBottom)
+      && canLoadMore
+      && isNearBottom,
+  };
+}
+
+export function getInfiniteRowWindow({ loadedRows, pageSize, totalRows }) {
+  const normalizedTotalRows = Math.max(0, Number(totalRows) || 0);
+  const offset = Math.min(
+    Math.max(0, Number(loadedRows) || 0),
+    normalizedTotalRows,
+  );
+  const normalizedPageSize = Math.max(1, Number(pageSize) || 1);
+  const remainingRows = Math.max(0, normalizedTotalRows - offset);
+  return {
+    offset,
+    limit: Math.min(normalizedPageSize, remainingRows),
+    hasMore: remainingRows > 0,
   };
 }
 
@@ -227,12 +285,15 @@ export function getGridColumnStyle({ columnWidth, maxWidth = DEFAULT_GRID_COLUMN
 
 export function getPinnedRowOffset({
   realRowIndex,
-  visiblePinnedRows,
+  visiblePinnedRows = [],
+  pinnedIndex: knownPinnedIndex,
   headerHeight = 56,
   filterHeight = 38,
   rowHeight = 29,
 }) {
-  const pinnedIndex = visiblePinnedRows.indexOf(realRowIndex);
+  const pinnedIndex = Number.isInteger(knownPinnedIndex)
+    ? knownPinnedIndex
+    : visiblePinnedRows.indexOf(realRowIndex);
   if (pinnedIndex === -1) {
     return undefined;
   }

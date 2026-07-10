@@ -41,6 +41,8 @@ test('normalizes editor settings with safe defaults and bounds', () => {
   assert.equal(normalizeEditorSettings({ defaultPageSize: 333 }).defaultPageSize, 333);
   assert.equal(normalizeEditorSettings({ maxRows: 1000 }).maxRows, 1000);
   assert.equal(normalizeEditorSettings({ maxFileSizeMb: 0 }).maxFileSizeMb, 0);
+  assert.equal(normalizeEditorSettings({ autoPagination: false }).autoPagination, false);
+  assert.equal(normalizeEditorSettings({ autoPagination: 'no' }).autoPagination, DEFAULT_EDITOR_SETTINGS.autoPagination);
 });
 
 test('max file size rejects only oversized WASM-loaded databases', () => {

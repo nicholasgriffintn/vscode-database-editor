@@ -18,9 +18,19 @@ export function buildTableSelect({
   const selectColumns = [identityColumn, visibleColumns].filter(Boolean).join(', ') || '*';
   const params = [];
   const where = buildFilterClause(columns, filter, columnFilters, params);
-  const order = sortColumn
-    ? ` ORDER BY ${quoteIdentifier(sortColumn)} ${sortDirection === 'desc' ? 'DESC' : 'ASC'}`
-    : '';
+  const orderColumns = [];
+  if (sortColumn) {
+    orderColumns.push(`${quoteIdentifier(sortColumn)} ${sortDirection === 'desc' ? 'DESC' : 'ASC'}`);
+  }
+  if (includeRowid) {
+    orderColumns.push('rowid ASC');
+  } else {
+    const primaryKeyColumns = columns
+      .filter((column) => Number(column.primaryKey) > 0 && column.name !== sortColumn)
+      .sort((left, right) => Number(left.primaryKey) - Number(right.primaryKey));
+    orderColumns.push(...primaryKeyColumns.map((column) => `${quoteIdentifier(column.name)} ASC`));
+  }
+  const order = orderColumns.length > 0 ? ` ORDER BY ${orderColumns.join(', ')}` : '';
 
   return {
     sql: `SELECT ${selectColumns} FROM ${quoteIdentifier(tableName)}${where}${order} LIMIT ? OFFSET ?`,

@@ -42,7 +42,7 @@ test('builds filtered, sorted, paged table selects with bound parameters', () =>
 
   assert.equal(
     query.sql,
-    'SELECT rowid AS __database_editor_rowid, "id", "display name", "score" FROM "people" WHERE CAST("id" AS TEXT) LIKE ? OR CAST("display name" AS TEXT) LIKE ? OR CAST("score" AS TEXT) LIKE ? ORDER BY "display name" DESC LIMIT ? OFFSET ?',
+    'SELECT rowid AS __database_editor_rowid, "id", "display name", "score" FROM "people" WHERE CAST("id" AS TEXT) LIKE ? OR CAST("display name" AS TEXT) LIKE ? OR CAST("score" AS TEXT) LIKE ? ORDER BY "display name" DESC, rowid ASC LIMIT ? OFFSET ?',
   );
   assert.deepEqual(query.params, ['%ada%', '%ada%', '%ada%', 50, 100]);
 });
@@ -75,9 +75,27 @@ test('builds table queries with global and per-column filters', () => {
 
   assert.equal(
     query.sql,
-    'SELECT rowid AS __database_editor_rowid, "id", "display name", "score" FROM "people" WHERE (CAST("id" AS TEXT) LIKE ? OR CAST("display name" AS TEXT) LIKE ? OR CAST("score" AS TEXT) LIKE ?) AND "id" >= ? AND CAST("display name" AS TEXT) LIKE ? AND "score" IS NOT NULL LIMIT ? OFFSET ?',
+    'SELECT rowid AS __database_editor_rowid, "id", "display name", "score" FROM "people" WHERE (CAST("id" AS TEXT) LIKE ? OR CAST("display name" AS TEXT) LIKE ? OR CAST("score" AS TEXT) LIKE ?) AND "id" >= ? AND CAST("display name" AS TEXT) LIKE ? AND "score" IS NOT NULL ORDER BY rowid ASC LIMIT ? OFFSET ?',
   );
   assert.deepEqual(query.params, ['%ada%', '%ada%', '%ada%', '10', '%hopper%', 25, 0]);
+});
+
+test('orders without-rowid table chunks by their primary key', () => {
+  const query = buildTableSelect({
+    tableName: 'memberships',
+    columns: [
+      { name: 'tenant_id', type: 'INTEGER', primaryKey: 1 },
+      { name: 'user_id', type: 'INTEGER', primaryKey: 2 },
+    ],
+    includeRowid: false,
+    limit: 50,
+    offset: 0,
+  });
+
+  assert.equal(
+    query.sql,
+    'SELECT "tenant_id", "user_id" FROM "memberships" ORDER BY "tenant_id" ASC, "user_id" ASC LIMIT ? OFFSET ?',
+  );
 });
 
 test('builds write statements without interpolating values', () => {

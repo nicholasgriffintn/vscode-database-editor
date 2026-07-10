@@ -22,6 +22,8 @@ import {
   getDeleteRowsConfirmationMessage,
   getGridColumnStyle,
   getObjectItemInteraction,
+  getInfiniteRowWindow,
+  getInfiniteScrollState,
   getPagerState,
   getPinnedCellStyle,
   getPinnedColumnLayout,
@@ -136,6 +138,11 @@ let pinnedRows = new Set();
 let gridBlobUrls = [];
 let clipboardRequestId = 0;
 const pendingClipboardReads = new Map();
+let isRefreshingRows = false;
+let isLoadingMoreRows = false;
+let infiniteScrollCheckFrame = 0;
+let lastGridScrollTop = 0;
+let isScrollingTowardBottom = true;
 
 const QUERY_RESULT_PREVIEW_LIMIT = 2500;
 
@@ -197,8 +204,10 @@ window.addEventListener('message', async (event) => {
     handleLoadError(message.message, message.settings);
   } else if (message.type === 'settingsChanged') {
     const oldMaxRows = editorSettings.maxRows;
+    const oldAutoPagination = editorSettings.autoPagination;
     applyEditorSettings(message.settings);
-    if (db && oldMaxRows !== editorSettings.maxRows) {
+    if (db && (oldMaxRows !== editorSettings.maxRows || oldAutoPagination !== editorSettings.autoPagination)) {
+      page = 1;
       await refreshRows();
     }
   } else if (message.type === 'databaseSaved') {
@@ -505,6 +514,16 @@ function buildShell() {
     pageSize = Number(pageSizeSelect.value);
     page = 1;
     await refreshRows();
+  });
+  grid.addEventListener('scroll', () => {
+    const nextScrollTop = grid.scrollTop;
+    if (nextScrollTop > lastGridScrollTop) {
+      isScrollingTowardBottom = true;
+      scheduleInfiniteScrollCheck();
+    } else if (nextScrollTop < lastGridScrollTop) {
+      isScrollingTowardBottom = false;
+    }
+    lastGridScrollTop = nextScrollTop;
   });
   copyRowsFormat.addEventListener('change', async () => {
     const format = copyRowsFormat.value;
@@ -1008,6 +1027,8 @@ async function refreshTables() {
 
 async function refreshRows() {
   const table = getActiveTable();
+  isRefreshingRows = true;
+  isLoadingMoreRows = false;
   selectedRow = null;
   selectedCell = null;
   selectedRowKeys.clear();
@@ -1021,12 +1042,19 @@ async function refreshRows() {
     updateRefreshUi();
     updateSelectionUi();
     postCopilotSelectionContext();
+    isRefreshingRows = false;
     return;
   }
 
   try {
-    const countQuery = buildTableCount({ tableName: table.name, columns: table.columns, filter, columnFilters });
-    const actualTotalRows = queryAll(db, countQuery.sql, countQuery.params, getQueryOptions())[0]?.count ?? 0;
+    let actualTotalRows = table.rowCount;
+    if (hasActiveGridFilters()) {
+      const countQuery = buildTableCount({ tableName: table.name, columns: table.columns, filter, columnFilters });
+      actualTotalRows = queryAll(db, countQuery.sql, countQuery.params, getQueryOptions())[0]?.count ?? 0;
+    }
+    if (editorSettings.autoPagination) {
+      page = 1;
+    }
     const rowWindow = getEffectiveRowWindow({
       totalRows: actualTotalRows,
       page,
@@ -1035,36 +1063,133 @@ async function refreshRows() {
     });
     totalRows = rowWindow.effectiveTotalRows;
     page = rowWindow.page;
-    const selectQuery = buildTableSelect({
-      tableName: table.name,
-      columns: table.columns,
-      filter,
-      columnFilters,
-      sortColumn,
-      sortDirection,
+    visibleRows = readGridRows(table, {
       limit: rowWindow.limit,
       offset: rowWindow.offset,
-      includeRowid: table.hasRowid,
     });
-    visibleRows = queryAll(db, selectQuery.sql, selectQuery.params, getQueryOptions()).map((row) => ({
-      identity: buildIdentity(table, row),
-      values: row,
-    }));
     renderGrid();
+    elements.grid.scrollTop = 0;
+    lastGridScrollTop = 0;
+    isScrollingTowardBottom = true;
     updatePager();
   } catch (error) {
     visibleRows = [];
     elements.grid.replaceChildren(createElement('div', { className: 'error-state', text: getErrorMessage(error) }));
   } finally {
+    isRefreshingRows = false;
     updateRefreshUi();
     updateSelectionUi();
     postCopilotSelectionContext();
+    scheduleInfiniteScrollCheck();
+  }
+}
+
+function hasActiveGridFilters() {
+  return Boolean(String(filter ?? '').trim())
+    || Object.values(columnFilters).some((value) => Boolean(String(value ?? '').trim()));
+}
+
+function readGridRows(table, { limit, offset }) {
+  const selectQuery = buildTableSelect({
+    tableName: table.name,
+    columns: table.columns,
+    filter,
+    columnFilters,
+    sortColumn,
+    sortDirection,
+    limit,
+    offset,
+    includeRowid: table.hasRowid,
+  });
+  return queryAll(db, selectQuery.sql, selectQuery.params, getQueryOptions()).map((row) => ({
+    identity: buildIdentity(table, row),
+    values: row,
+  }));
+}
+
+async function maybeLoadMoreRows() {
+  if (!db || refreshRowsDebounceTimer) {
+    return;
+  }
+
+  const scrollState = getInfiniteScrollState({
+    autoPagination: editorSettings.autoPagination,
+    loadedRows: visibleRows.length,
+    totalRows,
+    isLoading: isRefreshingRows || isLoadingMoreRows,
+    isScrollingTowardBottom,
+    scrollTop: elements.grid.scrollTop,
+    clientHeight: elements.grid.clientHeight,
+    scrollHeight: elements.grid.scrollHeight,
+  });
+
+  if (!scrollState.shouldLoadMore) {
+    return;
+  }
+
+  await loadMoreRows();
+}
+
+function scheduleInfiniteScrollCheck() {
+  if (infiniteScrollCheckFrame) {
+    return;
+  }
+
+  infiniteScrollCheckFrame = window.requestAnimationFrame(() => {
+    infiniteScrollCheckFrame = 0;
+    void maybeLoadMoreRows();
+  });
+}
+
+async function loadMoreRows() {
+  const table = getActiveTable();
+  if (!table || isRefreshingRows || isLoadingMoreRows || !editorSettings.autoPagination) {
+    return;
+  }
+
+  const rowWindow = getInfiniteRowWindow({
+    loadedRows: visibleRows.length,
+    pageSize,
+    totalRows,
+  });
+  if (!rowWindow.hasMore) {
+    return;
+  }
+
+  isLoadingMoreRows = true;
+  const startIndex = visibleRows.length;
+  try {
+    const nextRows = readGridRows(table, rowWindow);
+    if (nextRows.length === 0) {
+      totalRows = visibleRows.length;
+      updatePager();
+      return;
+    }
+
+    visibleRows.push(...nextRows);
+    appendGridRows(startIndex);
+    if (nextRows.length < rowWindow.limit) {
+      totalRows = visibleRows.length;
+    }
+    updatePager();
+    scheduleInfiniteScrollCheck();
+  } catch (error) {
+    visibleRows.length = startIndex;
+    renderGrid();
+    reportError(error);
+  } finally {
+    isLoadingMoreRows = false;
   }
 }
 
 function postCopilotSelectionContext() {
-  const selectedRows = getVisibleSelectedRows();
-  const selectedRowNumbers = selectedRows.map((row) => visibleRows.indexOf(row) + 1 + ((page - 1) * pageSize));
+  const visibleRowOffset = getVisibleRowOffset();
+  const selectedRowNumbers = [];
+  for (let rowIndex = 0; rowIndex < visibleRows.length; rowIndex += 1) {
+    if (selectedRowKeys.has(getRowSelectionKey(visibleRows[rowIndex].identity))) {
+      selectedRowNumbers.push(visibleRowOffset + rowIndex + 1);
+    }
+  }
   vscode.postMessage({
     type: 'copilotSelectionChanged',
     context: getCopilotSelectionContext({
@@ -1074,7 +1199,7 @@ function postCopilotSelectionContext() {
       sortColumn,
       sortDirection,
       selectedColumns: selectedCell?.columnName ? [selectedCell.columnName] : [],
-      selectedRowCount: selectedRows.length,
+      selectedRowCount: selectedRowNumbers.length,
       selectedRowNumbers,
     }),
   });
@@ -1417,19 +1542,25 @@ function fitSchemaGraph() {
   elements.schemaGraph.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
 }
 
-function renderGrid() {
+function getVisibleRowOffset() {
+  return editorSettings.autoPagination ? 0 : (page - 1) * pageSize;
+}
+
+function renderGrid({ appendFrom = null } = {}) {
   const table = getActiveTable();
   if (!table) {
     return;
   }
+  const isAppend = Number.isInteger(appendFrom) && appendFrom > 0;
 
   elements.copyRowsFormat.disabled = visibleRows.length === 0;
 
-  // Revoke stale blob object URLs
-  for (const url of gridBlobUrls) {
-    URL.revokeObjectURL(url);
+  if (!isAppend) {
+    for (const url of gridBlobUrls) {
+      URL.revokeObjectURL(url);
+    }
+    gridBlobUrls = [];
   }
-  gridBlobUrls = [];
   const gridBlobUrlsLocal = [];
 
   const tableElement = createElement('table', { className: 'data-grid' });
@@ -1557,12 +1688,14 @@ function renderGrid() {
   const columnCount = getGridColumnCount({ columnCount: table.columns.length, tableType: table.type });
   const tbody = createElement('tbody');
 
-  const visiblePinnedRows = [];
-  for (let i = 0; i < visibleRows.length; i++) {
-    if (pinnedRows.has((page - 1) * pageSize + i)) {
-      visiblePinnedRows.push((page - 1) * pageSize + i);
-    }
-  }
+  const visibleRowOffset = getVisibleRowOffset();
+  const visibleRowEnd = visibleRowOffset + visibleRows.length;
+  const visiblePinnedRows = [...pinnedRows]
+    .filter((rowIndex) => rowIndex >= visibleRowOffset && rowIndex < visibleRowEnd)
+    .sort((left, right) => left - right);
+  const visiblePinnedRowIndexes = new Map(
+    visiblePinnedRows.map((rowIndex, pinnedIndex) => [rowIndex, pinnedIndex]),
+  );
 
   if (visibleRows.length === 0) {
     tbody.append(createElement('tr', {
@@ -1576,12 +1709,16 @@ function renderGrid() {
     }));
   }
 
-  for (const [rowIndex, row] of visibleRows.entries()) {
-    const realRowIndex = (page - 1) * pageSize + rowIndex;
+  const firstRowIndex = isAppend ? appendFrom : 0;
+  for (let rowIndex = firstRowIndex; rowIndex < visibleRows.length; rowIndex += 1) {
+    const row = visibleRows[rowIndex];
+    const realRowIndex = visibleRowOffset + rowIndex;
     const isRowPinned = pinnedRows.has(realRowIndex);
     const rowSelectionKey = getRowSelectionKey(row.identity);
     const isRowSelectedForBatch = selectedRowKeys.has(rowSelectionKey);
-    const pinnedRowOffset = getPinnedRowOffset({ realRowIndex, visiblePinnedRows });
+    const pinnedRowOffset = isRowPinned
+      ? getPinnedRowOffset({ pinnedIndex: visiblePinnedRowIndexes.get(realRowIndex) })
+      : undefined;
     const tr = createElement('tr', {
       className: [
         selectedRow === rowIndex ? 'selected-row' : '',
@@ -1742,13 +1879,33 @@ function renderGrid() {
   }
 
   tableElement.append(tbody);
-  elements.grid.replaceChildren(tableElement);
+  if (isAppend) {
+    const renderedBody = elements.grid.querySelector('.data-grid tbody');
+    if (!renderedBody) {
+      for (const url of gridBlobUrlsLocal) {
+        URL.revokeObjectURL(url);
+      }
+      renderGrid();
+      return;
+    }
+    renderedBody.append(...tbody.children);
+    gridBlobUrls.push(...gridBlobUrlsLocal);
+  } else {
+    elements.grid.replaceChildren(tableElement);
+    gridBlobUrls = gridBlobUrlsLocal;
+  }
   const renderedSelectAll = elements.grid.querySelector('[data-select-all-rows]');
   if (renderedSelectAll) {
+    renderedSelectAll.checked = selectAllState.checked;
     renderedSelectAll.indeterminate = selectAllState.indeterminate;
+    renderedSelectAll.disabled = visibleRows.length === 0;
+    renderedSelectAll.title = selectAllState.checked ? 'Deselect visible rows' : 'Select visible rows';
   }
   updateSelectionUi();
-  gridBlobUrls = gridBlobUrlsLocal;
+}
+
+function appendGridRows(startIndex) {
+  renderGrid({ appendFrom: startIndex });
 }
 
 function buildGridEmptyState(table) {
@@ -1924,8 +2081,36 @@ function clearGridSelection() {
   gridEl?.querySelectorAll('.selected-row, .selected-cell, .multi-selected-row').forEach((element) => {
     element.classList.remove('selected-row', 'selected-cell', 'multi-selected-row');
   });
-  renderGrid();
+  syncRenderedSelectionState();
   postCopilotSelectionContext();
+}
+
+function syncRenderedSelectionState() {
+  const gridEl = elements.grid.querySelector('.data-grid');
+  if (!gridEl) {
+    return;
+  }
+
+  for (const renderedRow of gridEl.querySelectorAll('tr[data-row]')) {
+    const rowIndex = Number(renderedRow.dataset.row);
+    const row = visibleRows[rowIndex];
+    const selected = Boolean(row && selectedRowKeys.has(getRowSelectionKey(row.identity)));
+    renderedRow.classList.toggle('multi-selected-row', selected);
+    const checkbox = renderedRow.querySelector('[data-select-row]');
+    if (checkbox) {
+      checkbox.checked = selected;
+      checkbox.title = selected ? 'Deselect row' : 'Select row';
+    }
+  }
+
+  const selectAllState = getSelectAllRowsState({ visibleRows, selectedRowKeys });
+  const selectAll = gridEl.querySelector('[data-select-all-rows]');
+  if (selectAll) {
+    selectAll.checked = selectAllState.checked;
+    selectAll.indeterminate = selectAllState.indeterminate;
+    selectAll.title = selectAllState.checked ? 'Deselect visible rows' : 'Select visible rows';
+  }
+  updateSelectionUi();
 }
 
 async function smartDeleteSelection() {
@@ -2052,7 +2237,7 @@ async function handleClick(event) {
         selectedRowKeys.add(getRowSelectionKey(row.identity));
       }
     }
-    renderGrid();
+    syncRenderedSelectionState();
     postCopilotSelectionContext();
     return;
   }
@@ -2065,7 +2250,7 @@ async function handleClick(event) {
     if (row) {
       toggleRowSelection(rowIndex, { range: event.shiftKey, additive: true });
       selectGridRow(rowIndex);
-      renderGrid();
+      syncRenderedSelectionState();
     }
     return;
   }
@@ -2086,7 +2271,7 @@ async function handleClick(event) {
   const pinRowIcon = event.target.closest('[data-pin-row]');
   if (pinRowIcon) {
     const rowIndex = Number(pinRowIcon.dataset.pinRow);
-    const realRowIndex = (page - 1) * pageSize + rowIndex;
+    const realRowIndex = getVisibleRowOffset() + rowIndex;
     if (pinnedRows.has(realRowIndex)) {
       pinnedRows.delete(realRowIndex);
     } else {
@@ -2114,6 +2299,7 @@ async function handleClick(event) {
     const column = sortButton.dataset.sortColumn;
     sortDirection = sortColumn === column && sortDirection === 'asc' ? 'desc' : 'asc';
     sortColumn = column;
+    page = 1;
     await refreshRows();
     return;
   }
@@ -2124,7 +2310,7 @@ async function handleClick(event) {
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
       toggleRowSelection(rowIndex, { range: event.shiftKey, additive: event.metaKey || event.ctrlKey || event.shiftKey });
       selectGridRow(rowIndex);
-      renderGrid();
+      syncRenderedSelectionState();
       return;
     }
     selectGridCell(rowIndex, gridCell.dataset.gridCellColumn);
@@ -2137,7 +2323,7 @@ async function handleClick(event) {
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
       toggleRowSelection(rowIndex, { range: event.shiftKey, additive: event.metaKey || event.ctrlKey || event.shiftKey });
       selectGridRow(rowIndex);
-      renderGrid();
+      syncRenderedSelectionState();
       return;
     }
     selectGridRow(rowIndex);
@@ -2199,13 +2385,15 @@ async function runAction(action, sourceElement = null) {
       await refreshRows();
       break;
     case 'previous-page':
-      if (page > 1) {
+      if (!editorSettings.autoPagination && page > 1) {
         page -= 1;
         await refreshRows();
       }
       break;
     case 'next-page':
-      if (page < Math.ceil(totalRows / pageSize)) {
+      if (editorSettings.autoPagination) {
+        await loadMoreRows();
+      } else if (page < Math.ceil(totalRows / pageSize)) {
         page += 1;
         await refreshRows();
       }
@@ -2360,7 +2548,7 @@ function showRowDetails(rowIndex, initialColumnName = null) {
   const row = visibleRows[rowIndex];
   const dialog = createElement('dialog', { className: 'row-dialog' });
   const form = createElement('form', { className: 'row-dialog-form', attributes: { method: 'dialog' } });
-  const absoluteRowNumber = rowIndex + 1 + ((page - 1) * pageSize);
+  const absoluteRowNumber = rowIndex + 1 + getVisibleRowOffset();
   const title = createElement('div', {
     className: 'row-dialog-title-block',
     children: [
@@ -3372,6 +3560,8 @@ function updatePager() {
     pageSize,
     filteredRows: totalRows,
     totalRows: table?.rowCount ?? totalRows,
+    autoPagination: editorSettings.autoPagination,
+    loadedRows: visibleRows.length,
   });
   elements.pageLabel.textContent = `${pager.label}`;
   elements.pageRowCount.textContent = table
@@ -3381,6 +3571,8 @@ function updatePager() {
     : '';
   elements.previousPage.disabled = !pager.canGoPrevious;
   elements.nextPage.disabled = !pager.canGoNext;
+  elements.previousPage.classList.toggle('hidden', editorSettings.autoPagination);
+  elements.nextPage.classList.toggle('hidden', editorSettings.autoPagination);
   const editable = table?.type === 'table';
   elements.addRow.disabled = !editable;
   elements.deleteSelectedRows.disabled = !editable || getVisibleSelectedRows().length === 0;

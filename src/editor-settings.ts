@@ -1,6 +1,7 @@
 export interface EditorSettings {
   maxFileSizeMb: number;
   defaultPageSize: number;
+  autoPagination: boolean;
   maxRows: number;
   instantCommit: 'always' | 'never' | 'remote-only';
   doubleClickBehavior: 'inline' | 'modal';
@@ -18,6 +19,7 @@ export function readEditorSettings(configuration: ConfigurationReader, isRemote:
   return {
     maxFileSizeMb: configuration.get('maxFileSizeMb', 200),
     defaultPageSize: configuration.get('defaultPageSize', 500),
+    autoPagination: configuration.get('autoPagination', true),
     maxRows: configuration.get('maxRows', 0),
     instantCommit: configuration.get<EditorSettings['instantCommit']>('instantCommit', 'never'),
     doubleClickBehavior: configuration.get<EditorSettings['doubleClickBehavior']>('doubleClickBehavior', 'inline'),

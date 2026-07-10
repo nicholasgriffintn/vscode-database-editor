@@ -42,6 +42,7 @@ test('editor configuration exposes browsing, editing, persistence, and resource 
   const expected = {
     'databaseEditor.maxFileSizeMb': 200,
     'databaseEditor.defaultPageSize': 500,
+    'databaseEditor.autoPagination': true,
     'databaseEditor.maxRows': 0,
     'databaseEditor.instantCommit': 'never',
     'databaseEditor.doubleClickBehavior': 'inline',

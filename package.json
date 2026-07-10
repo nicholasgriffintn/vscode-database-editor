@@ -82,6 +82,12 @@
           "markdownDescription": "Default rows per page in the data grid when a database opens.",
           "scope": "resource"
         },
+        "databaseEditor.autoPagination": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Automatically append the next chunk of data-grid rows when scrolling to the bottom. Previously loaded rows remain available when scrolling back up.",
+          "scope": "resource"
+        },
         "databaseEditor.maxRows": {
           "type": "integer",
           "default": 0,
