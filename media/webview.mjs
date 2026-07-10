@@ -30,7 +30,9 @@ import {
   getPinnedRowOffset,
   getRefreshButtonState,
   getRowActions,
+  getRowNumberColumnStyle,
   getRowSelectionKey,
+  getShiftedPinnedColumnLeft,
   ROW_NUMBER_COLUMN_WIDTH,
   getSelectedVisibleRows,
   getSelectAllRowsState,
@@ -563,6 +565,12 @@ function buildShell() {
     const th = handle.closest('th');
     const startWidth = th?.offsetWidth || 120;
     const gridRows = Array.from(gridEl.querySelectorAll('tr'));
+    const pinnedColumnCells = columnName === '__rowNumber'
+      ? Array.from(gridEl.querySelectorAll('th.pinned, td.pinned')).map((cell) => ({
+          cell,
+          startLeft: Number.parseFloat(cell.style.left) || 0,
+        }))
+      : [];
     let rafHandle = 0;
 
     handle.classList.add('active');
@@ -574,6 +582,7 @@ function buildShell() {
       handle,
       colIndex,
       gridRows,
+      pinnedColumnCells,
     };
 
     function applyColumnWidth() {
@@ -589,6 +598,13 @@ function buildShell() {
           cell.style.minWidth = `${width}px`;
           cell.style.maxWidth = `${width}px`;
         }
+      }
+      for (const pinnedColumn of activeResize.pinnedColumnCells) {
+        pinnedColumn.cell.style.left = `${getShiftedPinnedColumnLeft({
+          startLeft: pinnedColumn.startLeft,
+          startWidth: activeResize.startWidth,
+          newWidth: width,
+        })}px`;
       }
       rafHandle = 0;
     }
@@ -1574,6 +1590,7 @@ function renderGrid({ appendFrom = null } = {}) {
     columnWidths,
     rowNumberWidth: columnWidths.__rowNumber || ROW_NUMBER_COLUMN_WIDTH,
   });
+  const rowNumberStyle = getRowNumberColumnStyle({ columnWidth: columnWidths.__rowNumber });
 
   // Row # column (sticky top-left corner)
   const selectAllState = getSelectAllRowsState({ visibleRows, selectedRowKeys });
@@ -1590,6 +1607,7 @@ function renderGrid({ appendFrom = null } = {}) {
   });
   headerRow.append(createElement('th', {
     className: 'row-number-header',
+    style: rowNumberStyle,
     children: [
       createElement('div', {
         className: 'column-header',
@@ -1598,10 +1616,15 @@ function renderGrid({ appendFrom = null } = {}) {
           createElement('span', { className: 'column-name row-number-heading-label', text: '#' }),
         ],
       }),
+      createElement('div', {
+        className: 'col-resize-handle',
+        attributes: { 'data-resize-column': '__rowNumber' },
+      }),
     ],
   }));
   filterRow.append(createElement('th', {
     className: 'row-number-header',
+    style: rowNumberStyle,
     text: '',
   }));
 
@@ -1735,6 +1758,7 @@ function renderGrid({ appendFrom = null } = {}) {
         isRowPinned ? 'pinned-row-cell' : '',
       ].filter(Boolean).join(' '),
       style: getPinnedCellStyle({
+        columnLayout: { style: rowNumberStyle },
         rowOffset: isRowPinned ? pinnedRowOffset : undefined,
         zIndex: isRowPinned ? 20 : undefined,
       }),

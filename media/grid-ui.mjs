@@ -241,6 +241,18 @@ function normalizeSelectionKeyValue(value) {
 
 export const ROW_NUMBER_COLUMN_WIDTH = 64;
 
+export function getRowNumberColumnStyle({ columnWidth } = {}) {
+  const configuredWidth = Number(columnWidth);
+  const width = Number.isFinite(configuredWidth) && configuredWidth > 0
+    ? configuredWidth
+    : ROW_NUMBER_COLUMN_WIDTH;
+  return `width:${width}px;min-width:${width}px;max-width:${width}px`;
+}
+
+export function getShiftedPinnedColumnLeft({ startLeft, startWidth, newWidth }) {
+  return startLeft + (newWidth - startWidth);
+}
+
 export function getPinnedColumnLayout({
   columns,
   pinnedColumns,

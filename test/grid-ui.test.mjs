@@ -16,6 +16,8 @@ import {
   getPinnedRowOffset,
   getRefreshButtonState,
   getRowActions,
+  getRowNumberColumnStyle,
+  getShiftedPinnedColumnLeft,
   getRowSelectionKey,
   getSelectedVisibleRows,
   getSelectAllRowsState,
@@ -318,6 +320,17 @@ test('unresized grid columns carry a max-width cap and resized columns override 
   assert.equal(getGridColumnStyle(), 'max-width:min(360px, 30vw)');
   assert.equal(getGridColumnStyle({ columnWidth: 420 }), 'width:420px;min-width:420px;max-width:420px');
   assert.equal(getGridColumnStyle({ columnWidth: 0 }), 'max-width:min(360px, 30vw)');
+});
+
+test('row-number column keeps its default width until the user resizes it', () => {
+  assert.equal(getRowNumberColumnStyle(), 'width:64px;min-width:64px;max-width:64px');
+  assert.equal(getRowNumberColumnStyle({ columnWidth: 140 }), 'width:140px;min-width:140px;max-width:140px');
+  assert.equal(getRowNumberColumnStyle({ columnWidth: 0 }), 'width:64px;min-width:64px;max-width:64px');
+});
+
+test('widening the row-number column shifts pinned data columns by the same amount', () => {
+  assert.equal(getShiftedPinnedColumnLeft({ startLeft: 64, startWidth: 64, newWidth: 140 }), 140);
+  assert.equal(getShiftedPinnedColumnLeft({ startLeft: 214, startWidth: 64, newWidth: 140 }), 290);
 });
 
 test('pinned columns get sequential sticky offsets after the row-number column', () => {
