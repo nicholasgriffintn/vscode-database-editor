@@ -133,7 +133,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
     listOpenDatabases: {
       invoke: () => disabledError() ?? result({
         databases: options.registry.listOpenDatabases(),
-        selection: options.registry.getSelectionContext(),
+        selection: sanitizeSelectionContext(options.registry.getSelectionContext()),
       }),
       prepareInvocation: () => ({ invocationMessage: 'Listing open SQLite databases' }),
     },
@@ -149,7 +149,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
         }
 
         try {
-          const selection = options.registry.getSelectionContext(opened.document.uri.toString());
+          const selection = sanitizeSelectionContext(options.registry.getSelectionContext(opened.document.uri.toString()));
           const contextInput = {
             ...(input ?? {}),
             objectName: input?.objectName ?? selection?.objectName,
@@ -395,6 +395,37 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
   };
 }
 
+function sanitizeSelectionContext(selection: SqliteSelectionContext | undefined): SqliteSelectionContext | undefined {
+  if (!selection) {
+    return undefined;
+  }
+
+  const legacySelection = selection as SqliteSelectionContext & {
+    filter?: unknown;
+    columnFilters?: Record<string, unknown>;
+  };
+  const filteredColumns = selection.filteredColumns
+    ?? (legacySelection.columnFilters
+      ? Object.entries(legacySelection.columnFilters)
+        .filter(([, value]) => value !== undefined && value !== null && value !== '')
+        .map(([column]) => column)
+        .sort((left, right) => left.localeCompare(right))
+      : undefined);
+
+  return {
+    databaseUri: selection.databaseUri,
+    ...(selection.objectName ? { objectName: selection.objectName } : {}),
+    ...(selection.objectType ? { objectType: selection.objectType } : {}),
+    ...(selection.hasFilter || legacySelection.filter ? { hasFilter: true } : {}),
+    ...(filteredColumns?.length ? { filteredColumns: [...filteredColumns] } : {}),
+    ...(selection.sortColumn ? { sortColumn: selection.sortColumn, sortDirection: selection.sortDirection } : {}),
+    ...(selection.selectedColumns?.length ? { selectedColumns: [...selection.selectedColumns] } : {}),
+    ...(selection.selectedRowCount ? { selectedRowCount: selection.selectedRowCount } : {}),
+    ...(selection.selectedRowNumbers?.length ? { selectedRowNumbers: [...selection.selectedRowNumbers] } : {}),
+    ...(selection.selectedRowScope ? { selectedRowScope: selection.selectedRowScope } : {}),
+  };
+}
+
 function getDatabaseContext(document: SqliteToolDocument, db: SqlJsDatabase, input: DbContextInput): unknown {
   const objects = getSchemaObjects(db, input.objectName);
   const database = {
@@ -528,24 +559,144 @@ function executeRows(
 
 function inferRedactedOutputColumns(sql: string, columns: string[], sensitivePatterns: RegExp[]): Set<string> {
   const redacted = new Set<string>();
-  const selectList = extractSelectList(sql);
-  if (!selectList) {
-    return redacted;
-  }
+  const selectLists = extractSelectLists(sql);
 
-  const expressions = splitTopLevelComma(selectList);
-  columns.forEach((column, index) => {
-    const expression = expressions[index];
-    if (expression && expressionReferencesSensitiveColumn(expression, sensitivePatterns)) {
-      redacted.add(column);
-    }
+  selectLists.forEach((selectList) => {
+    const expressions = splitTopLevelComma(selectList);
+    expressions.forEach((expression, index) => {
+      if (!expressionReferencesSensitiveColumn(expression, sensitivePatterns)) {
+        return;
+      }
+
+      const outputName = getExplicitOutputName(expression);
+      if (outputName && columns.includes(outputName)) {
+        redacted.add(outputName);
+        return;
+      }
+
+      if (expressions.length === columns.length && columns[index]) {
+        redacted.add(columns[index]);
+      }
+    });
   });
+
+  const maskedSql = maskSqlCommentsAndStringLiterals(sql);
+  const selectCount = maskedSql.match(/\bselect\b/gi)?.length ?? 0;
+  if (selectCount > 1 && sensitivePatterns.some((pattern) => pattern.test(maskedSql))) {
+    columns.forEach((column) => redacted.add(column));
+  }
   return redacted;
 }
 
-function extractSelectList(sql: string): string | undefined {
-  const match = /^\s*select\s+([\s\S]+?)\s+from\b/i.exec(sql);
-  return match?.[1];
+function extractSelectLists(sql: string): string[] {
+  const selectLists: string[] = [];
+  let selectIndex = findTopLevelKeyword(sql, 'select');
+
+  while (selectIndex !== -1) {
+    const listStart = selectIndex + 'select'.length;
+    const compoundIndexes = ['union', 'intersect', 'except']
+      .map((keyword) => findTopLevelKeyword(sql, keyword, listStart))
+      .filter((index) => index >= listStart);
+    const nextCompoundIndex = compoundIndexes.length
+      ? Math.min(...compoundIndexes)
+      : -1;
+    const listEnd = [
+      findTopLevelKeyword(sql, 'from', listStart),
+      findTopLevelKeyword(sql, 'order', listStart),
+      findTopLevelKeyword(sql, 'limit', listStart),
+      nextCompoundIndex,
+      sql.length,
+    ]
+      .filter((index) => index >= listStart)
+      .reduce((earliest, index) => Math.min(earliest, index), sql.length);
+    const selectList = sql.slice(listStart, listEnd).trim();
+    if (selectList) {
+      selectLists.push(selectList);
+    }
+
+    if (nextCompoundIndex === -1) {
+      break;
+    }
+    selectIndex = findTopLevelKeyword(sql, 'select', nextCompoundIndex + 1);
+  }
+
+  return selectLists;
+}
+
+function findTopLevelKeyword(sql: string, keyword: string, startIndex = 0): number {
+  let quote: string | undefined;
+  let depth = 0;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const character = sql[index];
+    const next = sql[index + 1];
+    if (quote) {
+      if (quote === ']' && character === ']') {
+        quote = undefined;
+      } else if (character === quote) {
+        if (sql[index + 1] === quote) {
+          index += 1;
+        } else {
+          quote = undefined;
+        }
+      }
+      continue;
+    }
+
+    if (character === '\'' || character === '"' || character === '`' || character === '[') {
+      quote = character === '[' ? ']' : character;
+      continue;
+    }
+    if (character === '-' && next === '-') {
+      index += 2;
+      while (index < sql.length && sql[index] !== '\n') index += 1;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      index += 2;
+      while (index < sql.length && !(sql[index] === '*' && sql[index + 1] === '/')) index += 1;
+      index += 1;
+      continue;
+    }
+    if (character === '(') {
+      depth += 1;
+      continue;
+    }
+    if (character === ')') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (index < startIndex || depth !== 0) {
+      continue;
+    }
+
+    const candidate = sql.slice(index, index + keyword.length);
+    const before = sql[index - 1];
+    const after = sql[index + keyword.length];
+    if (candidate.toLowerCase() === keyword
+      && (!before || !/[\w$]/.test(before))
+      && (!after || !/[\w$]/.test(after))) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function getExplicitOutputName(expression: string): string | undefined {
+  const match = /\s+(?:as\s+)?("(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|[A-Za-z_$][\w$]*)\s*$/i.exec(expression);
+  if (!match) {
+    return undefined;
+  }
+
+  const alias = match[1];
+  if (alias.startsWith('"') || alias.startsWith('`')) {
+    return alias.slice(1, -1).replaceAll(alias[0] + alias[0], alias[0]);
+  }
+  if (alias.startsWith('[')) {
+    return alias.slice(1, -1);
+  }
+  return alias;
 }
 
 function splitTopLevelComma(value: string): string[] {
@@ -594,8 +745,13 @@ function expressionReferencesSensitiveColumn(expression: string, sensitivePatter
   const sourceExpression = expression
     .replace(/\s+as\s+[^\s]+$/i, '')
     .replace(/\s+[^\s]+$/i, '');
-  const withoutStrings = sourceExpression.replace(/'([^']|'')*'|"([^"]|"")*"/g, ' ');
-  return sensitivePatterns.some((pattern) => pattern.test(withoutStrings));
+  return sensitivePatterns.some((pattern) => pattern.test(maskSqlCommentsAndStringLiterals(sourceExpression)));
+}
+
+function maskSqlCommentsAndStringLiterals(sql: string): string {
+  return sql
+    .replace(/--[^\n\r]*|\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/'([^']|'')*'/g, ' ');
 }
 
 function throwIfCancelled(token?: vscode.CancellationToken): void {

@@ -45,6 +45,17 @@ Test the extension in VS Code using the built-in Extension Development Host:
 
 The launch config compiles the extension, creates `.tmp/sample.sqlite`, and opens an Extension Development Host with the sample database. The custom SQLite editor should show tables, views, indexes, triggers, editable table rows, CSV export, and SQL dump export.
 
+## Architecture
+
+- `src/extension.ts` owns activation, the custom editor provider, and the typed extension-host/webview message boundary.
+- `src/sqlite-document.ts` and `src/sqlite-document-state.ts` own custom-document bytes, saved baselines, backup restoration, and dirty-state comparisons.
+- `src/editor-settings.ts` reads extension-host settings. Defaults must remain aligned with `media/editor-settings.mjs` and `package.json`; `test/editor-settings.test.mjs` enforces the host/webview defaults.
+- `src/sqlite-ai/` contains the Copilot participant, document registry, SQL safety checks, SQL.js host, and tools. Automatic editor context must never include row values or raw filter values.
+- `media/webview.mjs` coordinates the editor UI and delegates testable database, grid, schema, history, and settings behavior to the smaller `media/*.mjs` modules.
+- `test/*.test.mjs` exercises both browser-side ES modules and the compiled extension-host modules in `dist/`.
+
+When changing the host/webview protocol, update both message handlers and add regression coverage for any state transition that can affect saving, undo/redo, backups, or privacy. When adding a command or setting, update `package.json`, README documentation, and relevant manifest tests together.
+
 ## GitHub workflows
 
 - `.github/workflows/ci.yml` runs on pushes to `main` and pull requests. It installs with pnpm, runs tests, builds a VSIX, and uploads the VSIX as a workflow artifact.

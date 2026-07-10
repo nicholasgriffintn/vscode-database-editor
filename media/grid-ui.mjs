@@ -83,14 +83,15 @@ export function getCopilotSelectionContext({
   const activeColumnFilters = Object.fromEntries(
     Object.entries(columnFilters ?? {}).filter(([, value]) => value !== ''),
   );
+  const filteredColumns = Object.keys(activeColumnFilters).sort((left, right) => left.localeCompare(right));
   const rowCount = Number(selectedRowCount);
   const rowNumbers = Array.isArray(selectedRowNumbers)
     ? selectedRowNumbers.filter((value) => Number.isInteger(value) && value > 0)
     : [];
   return {
     ...(table ? { objectName: table.name, objectType: table.type } : {}),
-    ...(filter ? { filter } : {}),
-    ...(Object.keys(activeColumnFilters).length > 0 ? { columnFilters: activeColumnFilters } : {}),
+    ...(filter ? { hasFilter: true } : {}),
+    ...(filteredColumns.length > 0 ? { filteredColumns } : {}),
     ...(sortColumn ? { sortColumn, sortDirection } : {}),
     ...(selectedColumns?.length ? { selectedColumns: [...new Set(selectedColumns)] } : {}),
     ...(rowCount > 0 ? {

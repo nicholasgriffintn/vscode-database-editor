@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 
 import { applySnapshotDocumentChange } from './custom-document-history';
 import type { SnapshotChangeEvent } from './custom-document-history';
+import { readEditorSettings } from './editor-settings';
+import type { EditorSettings } from './editor-settings';
+import { SqliteDocument } from './sqlite-document';
 import { createSqliteChatParticipant, createSqliteFollowupProvider } from './sqlite-ai/chat-participant';
 import { SqliteDocumentRegistry } from './sqlite-ai/sqlite-document-registry';
 import type { SqliteSelectionContext, SqliteSelectionUpdate } from './sqlite-ai/sqlite-document-registry';
@@ -99,41 +102,6 @@ export function deactivate(): void {
   // VS Code disposes registered providers through the extension context.
 }
 
-class SqliteDocument implements vscode.CustomDocument {
-  private readonly changeEmitter = new vscode.EventEmitter<void>();
-  private data: Uint8Array;
-
-  readonly onDidDispose = this.changeEmitter.event;
-
-  private constructor(
-    readonly uri: vscode.Uri,
-    initialData: Uint8Array,
-  ) {
-    this.data = initialData;
-  }
-
-  static async create(uri: vscode.Uri, backupUri?: vscode.Uri): Promise<SqliteDocument> {
-    return new SqliteDocument(uri, await vscode.workspace.fs.readFile(backupUri ?? uri));
-  }
-
-  getData(): Uint8Array {
-    return this.data;
-  }
-
-  updateData(data: Uint8Array): void {
-    this.data = data;
-  }
-
-  async reload(): Promise<void> {
-    this.data = await vscode.workspace.fs.readFile(this.uri);
-  }
-
-  dispose(): void {
-    this.changeEmitter.fire();
-    this.changeEmitter.dispose();
-  }
-}
-
 class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument> {
   private readonly changeEmitter = new vscode.EventEmitter<SnapshotChangeEvent<SqliteDocument>>();
   private readonly registry = new SqliteDocumentRegistry<SqliteDocument>();
@@ -186,7 +154,13 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
           this.registry.updateSelectionContext(document, message.context);
           break;
         case 'requestSave':
-          await vscode.commands.executeCommand('workbench.action.files.save');
+          try {
+            await vscode.commands.executeCommand('workbench.action.files.save');
+          } catch (error) {
+            const message = getErrorMessage(error);
+            await webview.postMessage({ type: 'databaseSaveFailed', message });
+            await vscode.window.showErrorMessage(message);
+          }
           break;
         case 'error':
           await vscode.window.showErrorMessage(message.message);
@@ -218,13 +192,33 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
   }
 
   async saveCustomDocument(document: SqliteDocument, cancellation?: vscode.CancellationToken): Promise<void> {
-    await vscode.workspace.fs.writeFile(document.uri, document.getData());
-    await this.postToDocumentPanels(document, { type: 'databaseSaved' });
+    if (cancellation?.isCancellationRequested) {
+      throw new vscode.CancellationError();
+    }
+    const savedData = document.getData();
+    await vscode.workspace.fs.writeFile(document.uri, savedData);
+    document.markSaved(savedData);
+    await this.postToDocumentPanels(document, {
+      type: 'databaseSaved',
+      dirty: document.isDirty(),
+    });
   }
 
-  async saveCustomDocumentAs(document: SqliteDocument, destination: vscode.Uri): Promise<void> {
-    await vscode.workspace.fs.writeFile(destination, document.getData());
-    await this.postToDocumentPanels(document, { type: 'databaseSaved' });
+  async saveCustomDocumentAs(
+    document: SqliteDocument,
+    destination: vscode.Uri,
+    cancellation?: vscode.CancellationToken,
+  ): Promise<void> {
+    if (cancellation?.isCancellationRequested) {
+      throw new vscode.CancellationError();
+    }
+    const savedData = document.getData();
+    await vscode.workspace.fs.writeFile(destination, savedData);
+    document.markSaved(savedData);
+    await this.postToDocumentPanels(document, {
+      type: 'databaseSaved',
+      dirty: document.isDirty(),
+    });
   }
 
   async revertCustomDocument(document: SqliteDocument): Promise<void> {
@@ -234,6 +228,8 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       name: vscode.workspace.asRelativePath(document.uri),
       data: toArrayBuffer(document.getData()),
       settings: this.getEditorSettings(document.uri),
+      dirty: false,
+      resetViewState: false,
     });
   }
 
@@ -291,6 +287,8 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       name: vscode.workspace.asRelativePath(document.uri),
       data: toArrayBuffer(data),
       settings,
+      dirty: document.isDirty(),
+      resetViewState: true,
     });
   }
 
@@ -300,12 +298,15 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     label?: string,
     refreshPanels = false,
   ): Promise<void> {
+    let isRegisteringNewEdit = refreshPanels;
     const postSnapshot = async (snapshot: Uint8Array): Promise<void> => {
       await this.postToDocumentPanels(document, {
         type: 'loadDatabase',
         name: vscode.workspace.asRelativePath(document.uri),
         data: toArrayBuffer(snapshot),
         settings: this.getEditorSettings(document.uri),
+        dirty: document.isDirty(snapshot, { isNewEdit: isRegisteringNewEdit }),
+        resetViewState: false,
       });
     };
     await applySnapshotDocumentChange({
@@ -317,21 +318,18 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       postAfterApply: refreshPanels,
       maxUndoMemoryBytes: this.getEditorSettings(document.uri).maxUndoMemoryBytes,
     });
+    isRegisteringNewEdit = false;
+    await this.postToDocumentPanels(document, {
+      type: 'documentStateChanged',
+      dirty: document.isDirty(undefined, { isNewEdit: true }),
+    });
   }
 
   private getEditorSettings(uri: vscode.Uri): EditorSettings {
-    const configuration = vscode.workspace.getConfiguration('databaseEditor', uri);
-    return {
-      maxFileSizeMb: configuration.get('maxFileSizeMb', 200),
-      defaultPageSize: configuration.get('defaultPageSize', 500),
-      maxRows: configuration.get('maxRows', 0),
-      instantCommit: configuration.get<EditorSettings['instantCommit']>('instantCommit', 'never'),
-      doubleClickBehavior: configuration.get<EditorSettings['doubleClickBehavior']>('doubleClickBehavior', 'inline'),
-      blobExportMode: configuration.get<EditorSettings['blobExportMode']>('blobExportMode', 'native'),
-      queryTimeoutMs: configuration.get('queryTimeoutMs', 30_000),
-      maxUndoMemoryBytes: configuration.get('maxUndoMemoryBytes', 52_428_800),
-      isRemote: uri.scheme !== 'file',
-    };
+    return readEditorSettings(
+      vscode.workspace.getConfiguration('databaseEditor', uri),
+      uri.scheme !== 'file',
+    );
   }
 
   private async postToDocumentPanels(document: SqliteDocument, message: ExtensionMessage): Promise<void> {
@@ -450,23 +448,13 @@ type WebviewMessage =
   | SaveBinaryMessage;
 
 type ExtensionMessage =
-  | { type: 'loadDatabase'; name: string; data: ArrayBuffer; settings: EditorSettings }
+  | { type: 'loadDatabase'; name: string; data: ArrayBuffer; settings: EditorSettings; dirty: boolean; resetViewState: boolean }
   | { type: 'loadError'; message: string; settings: EditorSettings }
   | { type: 'settingsChanged'; settings: EditorSettings }
-  | { type: 'databaseSaved' }
+  | { type: 'databaseSaved'; dirty: boolean }
+  | { type: 'databaseSaveFailed'; message: string }
+  | { type: 'documentStateChanged'; dirty: boolean }
   | { type: 'clipboardText'; requestId: string; text: string };
-
-interface EditorSettings {
-  maxFileSizeMb: number;
-  defaultPageSize: number;
-  maxRows: number;
-  instantCommit: 'always' | 'never' | 'remote-only';
-  doubleClickBehavior: 'inline' | 'modal';
-  blobExportMode: 'native' | 'web';
-  queryTimeoutMs: number;
-  maxUndoMemoryBytes: number;
-  isRemote: boolean;
-}
 
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(data.byteLength);
@@ -491,4 +479,8 @@ type SaveBinaryMessage = {
 function dirname(path: string): string {
   const index = path.lastIndexOf('/');
   return index <= 0 ? '/' : path.slice(0, index);
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

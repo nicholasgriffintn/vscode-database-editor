@@ -20,6 +20,30 @@ test('list-open-databases tool returns registry databases', async () => {
   }]);
 });
 
+test('database tools omit raw filter values from Copilot selection context', async () => {
+  const harness = createToolHarness({
+    selectionContext: {
+      objectName: 'people',
+      objectType: 'table',
+      filter: 'secret@example.com',
+      columnFilters: { token: 'abc123', team_id: '1' },
+      sortColumn: 'name',
+      sortDirection: 'asc',
+    },
+  });
+
+  const listResult = await invokeJson(harness.tools.listOpenDatabases, {});
+  const schemaResult = await invokeJson(harness.tools.dbContext, {});
+  const serialized = JSON.stringify({ listResult, schemaResult });
+
+  assert.equal(serialized.includes('secret@example.com'), false);
+  assert.equal(serialized.includes('abc123'), false);
+  assert.equal(listResult.selection.hasFilter, true);
+  assert.deepEqual(listResult.selection.filteredColumns, ['team_id', 'token']);
+  assert.equal(schemaResult.selection.hasFilter, true);
+  assert.deepEqual(schemaResult.selection.filteredColumns, ['team_id', 'token']);
+});
+
 test('schema context describes tables, columns, indexes, triggers, and row counts', async () => {
   const harness = createToolHarness();
   const result = await invokeJson(harness.tools.dbContext, { objectName: 'people' });
@@ -116,6 +140,62 @@ test('query tool redacts sensitive source columns even when aliased', async () =
   });
 
   assert.deepEqual(result.rows, [{ value: '[REDACTED]' }, { value: '[REDACTED]' }]);
+});
+
+test('query tool redacts aliased sensitive columns in WITH queries', async () => {
+  const harness = createToolHarness({ sensitiveColumnPatterns: ['name'] });
+  const result = await invokeJson(harness.tools.query, {
+    query: 'WITH selected_people AS (SELECT name FROM people) SELECT name AS value FROM selected_people ORDER BY value',
+    queryName: 'aliased CTE names',
+    queryDescription: 'Attempt to alias a sensitive source column through a CTE',
+  });
+
+  assert.deepEqual(result.rows, [{ value: '[REDACTED]' }, { value: '[REDACTED]' }]);
+});
+
+test('query tool conservatively redacts nested projections that rename sensitive columns', async () => {
+  const harness = createToolHarness({ sensitiveColumnPatterns: ['name'] });
+  const result = await invokeJson(harness.tools.query, {
+    query: 'WITH selected_people AS (SELECT name AS hidden FROM people) SELECT hidden AS value FROM selected_people ORDER BY value',
+    queryName: 'nested aliased names',
+    queryDescription: 'Attempt to rename a sensitive source column before the outer projection',
+  });
+
+  assert.deepEqual(result.rows, [{ value: '[REDACTED]' }, { value: '[REDACTED]' }]);
+});
+
+test('query tool redacts quoted sensitive source columns when aliased', async () => {
+  const harness = createToolHarness({ sensitiveColumnPatterns: ['name'] });
+  const result = await invokeJson(harness.tools.query, {
+    query: 'SELECT "name" AS value FROM people ORDER BY id',
+    queryName: 'quoted sensitive names',
+    queryDescription: 'Attempt to hide a sensitive source column with quoting and an alias',
+  });
+
+  assert.deepEqual(result.rows, [{ value: '[REDACTED]' }, { value: '[REDACTED]' }]);
+});
+
+test('query tool does not treat sensitive words inside string literals as column references', async () => {
+  const harness = createToolHarness({ sensitiveColumnPatterns: ['name'] });
+  const result = await invokeJson(harness.tools.query, {
+    query: "SELECT 'name' AS value",
+    queryName: 'literal value',
+    queryDescription: 'Return a non-sensitive string literal',
+  });
+
+  assert.deepEqual(result.rows, [{ value: 'name' }]);
+});
+
+test('query tool redacts a compound-query output when a later branch selects sensitive data', async () => {
+  const harness = createToolHarness({ sensitiveColumnPatterns: ['name'] });
+  const result = await invokeJson(harness.tools.query, {
+    query: 'SELECT id AS value FROM people UNION ALL SELECT name FROM people ORDER BY value',
+    queryName: 'mixed identifier values',
+    queryDescription: 'Attempt to place sensitive values in a compound query output',
+  });
+
+  assert.equal(result.rows.length, 4);
+  assert.equal(result.rows.every((row) => row.value === '[REDACTED]'), true);
 });
 
 test('query tool stops when its cancellation token is requested', async () => {
@@ -365,6 +445,7 @@ function createToolHarness({
   sqlStatic = SQL,
   additionalDatabase = false,
   selectedObject,
+  selectionContext,
   maxResultRows = 200,
   sensitiveColumnPatterns = [],
 } = {}) {
@@ -388,6 +469,9 @@ function createToolHarness({
     },
     getSelectionContext(uri) {
       const databaseUri = uri ?? document.uri.toString();
+      if (selectionContext) {
+        return { databaseUri, ...selectionContext };
+      }
       return selectedObject ? { databaseUri, objectName: selectedObject, objectType: 'table' } : { databaseUri };
     },
     async applyCopilotDatabaseChange(target, data, label) {

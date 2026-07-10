@@ -15,8 +15,8 @@ export type SqliteSelectionContext = {
   databaseUri: string;
   objectName?: string;
   objectType?: 'table' | 'view';
-  filter?: string;
-  columnFilters?: Record<string, string>;
+  hasFilter?: boolean;
+  filteredColumns?: string[];
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   selectedColumns?: string[];
@@ -99,7 +99,7 @@ export class SqliteDocumentRegistry<TDocument extends RegistrySqliteDocument> {
     if (entry) {
       entry.selection = {
         ...selection,
-        columnFilters: selection.columnFilters ? { ...selection.columnFilters } : undefined,
+        ...(selection.filteredColumns ? { filteredColumns: [...selection.filteredColumns] } : {}),
         ...(selection.selectedColumns ? { selectedColumns: [...selection.selectedColumns] } : {}),
         ...(selection.selectedRowNumbers ? { selectedRowNumbers: [...selection.selectedRowNumbers] } : {}),
       };
@@ -116,7 +116,7 @@ export class SqliteDocumentRegistry<TDocument extends RegistrySqliteDocument> {
     return {
       databaseUri: document.uri.toString(),
       ...selection,
-      columnFilters: selection?.columnFilters ? { ...selection.columnFilters } : undefined,
+      ...(selection?.filteredColumns ? { filteredColumns: [...selection.filteredColumns] } : {}),
       ...(selection?.selectedColumns ? { selectedColumns: [...selection.selectedColumns] } : {}),
       ...(selection?.selectedRowNumbers ? { selectedRowNumbers: [...selection.selectedRowNumbers] } : {}),
     };

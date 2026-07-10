@@ -10,6 +10,20 @@ import {
   normalizeEditorSettings,
   shouldRejectWasmFile,
 } from '../media/editor-settings.mjs';
+import hostSettingsModule from '../dist/editor-settings.js';
+
+const { readEditorSettings } = hostSettingsModule;
+
+test('extension host and webview share the same editor setting defaults', () => {
+  const settings = readEditorSettings({
+    get(_section, defaultValue) {
+      return defaultValue;
+    },
+  }, false);
+
+  assert.deepEqual(settings, DEFAULT_EDITOR_SETTINGS);
+  assert.equal(readEditorSettings({ get: (_section, defaultValue) => defaultValue }, true).isRemote, true);
+});
 
 test('normalizes editor settings with safe defaults and bounds', () => {
   assert.deepEqual(normalizeEditorSettings({}), DEFAULT_EDITOR_SETTINGS);

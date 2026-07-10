@@ -21,7 +21,7 @@ import {
   shouldKeepKeyboardShortcutInField,
 } from '../media/grid-ui.mjs';
 
-test('Copilot selection context includes grid state without row values', () => {
+test('Copilot selection context includes grid state without row or filter values', () => {
   assert.deepEqual(getCopilotSelectionContext({
     table: { name: 'people', type: 'table' },
     filter: 'Ada',
@@ -34,8 +34,8 @@ test('Copilot selection context includes grid state without row values', () => {
   }), {
     objectName: 'people',
     objectType: 'table',
-    filter: 'Ada',
-    columnFilters: { team: 'Computing' },
+    hasFilter: true,
+    filteredColumns: ['team'],
     sortColumn: 'name',
     sortDirection: 'desc',
     selectedColumns: ['name'],

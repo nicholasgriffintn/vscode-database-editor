@@ -1,6 +1,6 @@
 # Database Editor for VS Code
 
-A fast, lightweight SQLite database editor built directly into VS Code. Browse tables, edit data, run queries, and manage your database schema — all without leaving the editor.
+A fast, lightweight SQLite database editor built directly into VS Code. Browse tables and views, edit data, run queries, manage schemas, and optionally work with the open database through GitHub Copilot Chat.
 
 [![Visual Studio Marketplace](https://img.shields.io/badge/marketplace-NicholasGriffin.vscode--database--editor-blue)](https://marketplace.visualstudio.com/items?itemName=NicholasGriffin.vscode-database-editor)
 
@@ -12,22 +12,28 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 - **Browse database structure** — Tables, views, indexes, triggers, columns, primary and foreign keys in a clean sidebar
 - **Copilot integration** — Use Copilot Chat to inspect schema, run queries, and analyze tables with privacy-safe context
 - **Paged data grid** — Sort, filter, and paginate through table data with per-column search
-- **Inline editing** — Click any cell to edit its value, add new rows, or delete existing ones
+- **Data editing** — Double-click editable cells for inline or modal editing, add rows, and delete one or many selected rows
 - **Image preview** — BLOB columns with PNG/JPEG/GIF/WebP images render as thumbnails inline
 - **Pin rows & columns** — Pin important columns to the left and mark rows for easy reference
 - **VS Code save integration** — Edits are tracked and saved using the normal `Ctrl+S` / `Cmd+S` flow with undo/redo support
 - **Schema management** — Create, rename, and drop tables; add and remove columns
 - **SQL workspace** — Run SELECTs, PRAGMAs, and multi-statement SQL scripts with result grids, query history, rollback-safe writes, and normal VS Code save tracking
 - **Export** — Export visible rows as CSV, or dump schema and table data as SQL
-- **Pure client-side** — Powered by [`sql.js`](https://github.com/sql-js/sql.js) (SQLite compiled to WebAssembly) — no native dependencies
+- **Local SQLite runtime** — Powered by [`sql.js`](https://github.com/sql-js/sql.js) (SQLite compiled to WebAssembly) with no native SQLite installation or database server required
 
 ## Usage
 
-1. Open any SQLite database file (`.db`, `.sqlite`, etc.) in VS Code.
+1. Open a recognized SQLite database file (`.db`, `.db3`, `.sqlite`, `.sqlite3`, `.sdb`, `.s3db`, or `.gpkg`) in VS Code. For another extension, run **Open as SQLite Database** from the Command Palette or the Explorer context menu.
 2. The custom editor launches automatically — browse tables in the sidebar.
 3. Click a table to view its data in the paged grid.
 4. Click once to select a cell, double-click to edit it, or use the row Actions column for row-level editing.
-5. Press `Ctrl+S` (`Cmd+S` on macOS) or click the Save button to persist changes unless `databaseEditor.instantCommit` is enabled.
+5. Press `Ctrl+S` (`Cmd+S` on macOS) or click **Save** to persist changes unless `databaseEditor.instantCommit` is enabled.
+
+### How editing and saving work
+
+The extension loads the database into an in-memory SQLite runtime. Grid edits, schema changes, SQL writes, and confirmed Copilot writes update that working copy and mark the VS Code custom editor as dirty. The original file is not replaced until the normal VS Code Save command runs. Save As, revert, hot-exit backups, and VS Code's custom-editor undo/redo flow are supported.
+
+Tables can be edited using their declared primary key or SQLite `rowid`. Views and tables without a usable row identity remain available for browsing and SQL queries but cannot be changed through the data grid. BLOB values are read-only in the grid and can be previewed or exported from row details.
 
 ### Schema tools
 
@@ -61,7 +67,7 @@ If a script with explicit transaction control commits a change before a later st
 
 ### GitHub Copilot integration
 
-When GitHub Copilot Chat is installed, use `@sqlite`, its `/schema`, `/query`, `/explain`, and `/profile` commands, or the “Chat with SQLite Database” editor action. The participant keeps recent conversation turns and receives privacy-safe editor context: the active database, selected table/view, filters, and sort state. Grid row values are never included in that automatic context.
+When GitHub Copilot Chat is installed, use `@sqlite`, its `/schema`, `/query`, `/explain`, and `/profile` commands, or the “Chat with SQLite Database” editor action. The participant keeps recent conversation turns and receives privacy-safe editor context: the active database, selected table/view, sort state, selected column names, selected visible row numbers, and whether filters are active. Grid row values and raw filter text are never included in that automatic context.
 
 ![GitHub Copilot Chat integration demo](docs/copilot-demo.gif)
 
@@ -123,16 +129,25 @@ Settings use the extension's actual `databaseEditor.*` namespace. They can be se
 | `databaseEditor.blobExportMode` | `native` | BLOB export method: `native` uses VS Code's save dialog/filesystem APIs; `web` uses a webview download link. |
 | `databaseEditor.queryTimeoutMs` | `30000` | Soft query time budget for grid browsing and row-stepped reads. SQLite/WASM can only check this between statement steps, not during a single long SQLite step. |
 | `databaseEditor.maxUndoMemoryBytes` | `52428800` | Maximum combined before/after snapshot bytes retained for a single undoable edit. Larger edits still mark the database dirty but skip per-edit undo snapshots to avoid excessive memory use. |
+| `databaseEditor.copilot.enable` | `true` | Enables the `@sqlite` participant and SQLite language-model tools. |
+| `databaseEditor.copilot.accessMode` | `ro` | Copilot access: read-only (`ro`) or user-confirmed read/write (`rw`). |
+| `databaseEditor.copilot.maxResultRows` | `200` | Maximum rows returned by a Copilot query (1–500). |
+| `databaseEditor.copilot.queryTimeoutMs` | `5000` | Soft time budget in milliseconds for Copilot query and analysis tools. |
+| `databaseEditor.copilot.sensitiveColumnPatterns` | common secret names | Case-insensitive regular expressions for columns whose values are redacted before Copilot receives query results. |
 
 ## Requirements
 
 - VS Code 1.125.0 or later
-- No external dependencies — SQLite runs entirely in the webview via WebAssembly
+- No external database server or native SQLite installation is required; the extension bundles its WebAssembly SQLite runtime
 
 ## Known Limitations
 
-- Only SQLite databases are supported (other SQL databases planned for future releases)
-- SQL workspace changes run against the editor's in-memory copy until you save the custom editor
+- Only SQLite databases are supported.
+- The full database is loaded into memory. `databaseEditor.maxFileSizeMb` protects the editor from unexpectedly large files, but practical limits still depend on available memory.
+- SQL workspace changes run against the editor's in-memory copy until you save the custom editor.
+- Query timeouts are cooperative checks between SQLite result steps; a single expensive SQLite/WASM step cannot be interrupted mid-step.
+- Views and tables without a usable primary key or `rowid` are browse-only in the data grid. They can still be queried from the SQL workspace.
+- Automatic Copilot redaction is based on output and referenced column names. Review sensitive databases before allowing query results to be sent to a language model.
 
 ## License
 

@@ -184,8 +184,11 @@ vscode.postMessage({ type: 'ready' });
 window.addEventListener('message', async (event) => {
   const message = event.data;
   if (message.type === 'loadDatabase') {
-    applyEditorSettings(message.settings, { resetPageSize: true });
-    await openDatabase(message.name, message.data);
+    applyEditorSettings(message.settings, { resetPageSize: message.resetViewState !== false });
+    await openDatabase(message.name, message.data, {
+      dirty: message.dirty,
+      resetViewState: message.resetViewState,
+    });
   } else if (message.type === 'loadError') {
     handleLoadError(message.message, message.settings);
   } else if (message.type === 'settingsChanged') {
@@ -195,7 +198,12 @@ window.addEventListener('message', async (event) => {
       await refreshRows();
     }
   } else if (message.type === 'databaseSaved') {
-    handleDatabaseSaved();
+    handleDatabaseSaved(message.dirty);
+  } else if (message.type === 'databaseSaveFailed') {
+    handleDatabaseSaveFailed(message.message);
+  } else if (message.type === 'documentStateChanged') {
+    isDirty = Boolean(message.dirty);
+    updateSaveUi();
   } else if (message.type === 'clipboardText') {
     const pending = pendingClipboardReads.get(message.requestId);
     if (pending) {
@@ -792,33 +800,35 @@ async function handleInput(event) {
   }
 }
 
-async function openDatabase(name, data) {
-  // Revoke any leftover blob URLs from the previous database
-  for (const url of gridBlobUrls) {
-    URL.revokeObjectURL(url);
-  }
-  gridBlobUrls = [];
+async function openDatabase(name, data, { dirty = false, resetViewState = true } = {}) {
   try {
     elements.status.textContent = 'Opening database...';
     SQL ??= await initSqlJs({ locateFile: () => wasmUri });
+    const nextDatabase = new SQL.Database(new Uint8Array(data));
+    for (const url of gridBlobUrls) {
+      URL.revokeObjectURL(url);
+    }
+    gridBlobUrls = [];
     db?.close();
-    db = new SQL.Database(new Uint8Array(data));
+    db = nextDatabase;
     databaseName = name;
     elements.title.textContent = name;
-    selectedRow = null;
-    selectedCell = null;
-    selectedRowKeys.clear();
-    lastSelectedRowIndex = null;
-    page = 1;
-    filter = '';
-    pinnedRows.clear();
-    pinnedColumns.clear();
-    columnFilters = {};
-    objectFilter = '';
-    elements.filterInput.value = '';
-    sortColumn = null;
-    sortDirection = 'asc';
-    isDirty = false;
+    if (resetViewState) {
+      selectedRow = null;
+      selectedCell = null;
+      selectedRowKeys.clear();
+      lastSelectedRowIndex = null;
+      page = 1;
+      filter = '';
+      pinnedRows.clear();
+      pinnedColumns.clear();
+      columnFilters = {};
+      objectFilter = '';
+      elements.filterInput.value = '';
+      sortColumn = null;
+      sortDirection = 'asc';
+    }
+    isDirty = Boolean(dirty);
     isSaving = false;
     await refreshTables();
     updateSaveUi();
@@ -890,10 +900,17 @@ function maybeAutoCommit() {
   }
 }
 
-function handleDatabaseSaved() {
-  isDirty = false;
+function handleDatabaseSaved(dirty = false) {
+  isDirty = Boolean(dirty);
   isSaving = false;
   updateSaveUi();
+}
+
+function handleDatabaseSaveFailed(message) {
+  isDirty = true;
+  isSaving = false;
+  updateSaveUi();
+  elements.status.textContent = `Save failed: ${message}`;
 }
 
 function requestSave() {
