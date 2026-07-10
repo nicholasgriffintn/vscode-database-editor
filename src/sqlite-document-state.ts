@@ -3,10 +3,12 @@ import { createHash } from 'node:crypto';
 export class SqliteDocumentState {
   private data: Uint8Array;
   private savedFingerprint: string | undefined;
+  private dataFingerprint: string | undefined;
 
   constructor(initialData: Uint8Array, savedData: Uint8Array | null = initialData) {
     this.data = initialData;
-    this.savedFingerprint = savedData ? fingerprint(savedData) : undefined;
+    this.savedFingerprint = savedData ? this.fingerprint(savedData) : undefined;
+    this.dataFingerprint = this.fingerprint(initialData);
   }
 
   getData(): Uint8Array {
@@ -15,25 +17,46 @@ export class SqliteDocumentState {
 
   updateData(data: Uint8Array): void {
     this.data = data;
+    this.dataFingerprint = undefined;
   }
 
   markSaved(data: Uint8Array = this.data): void {
-    this.savedFingerprint = fingerprint(data);
+    this.savedFingerprint = this.fingerprint(data);
+    if (data === this.data) {
+      this.dataFingerprint = this.savedFingerprint;
+    }
   }
 
   replaceWithSavedData(data: Uint8Array): void {
     this.data = data;
-    this.markSaved();
+    const savedFingerprint = this.fingerprint(data);
+    this.savedFingerprint = savedFingerprint;
+    this.dataFingerprint = savedFingerprint;
   }
 
   isDirty(
     data: Uint8Array = this.data,
     { isNewEdit = false }: { isNewEdit?: boolean } = {},
   ): boolean {
-    return isNewEdit || this.savedFingerprint === undefined || fingerprint(data) !== this.savedFingerprint;
-  }
-}
+    if (isNewEdit) {
+      return true;
+    }
 
-function fingerprint(data: Uint8Array): string {
-  return createHash('sha256').update(data).digest('base64');
+    if (this.savedFingerprint === undefined) {
+      return true;
+    }
+
+    return this.getDataFingerprint(data) !== this.savedFingerprint;
+  }
+
+  private getDataFingerprint(data: Uint8Array): string {
+    if (data === this.data && this.dataFingerprint !== undefined) {
+      return this.dataFingerprint;
+    }
+    return this.fingerprint(data);
+  }
+
+  private fingerprint(data: Uint8Array): string {
+    return createHash('sha256').update(data).digest('base64');
+  }
 }

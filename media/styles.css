@@ -393,6 +393,14 @@ button {
   overflow: auto;
 }
 
+.query-result-truncated td {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+  text-align: center;
+  background: var(--surface-1);
+}
+
 .grid-wrap {
   position: relative;
 }

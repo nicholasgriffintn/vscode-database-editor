@@ -137,6 +137,10 @@ let gridBlobUrls = [];
 let clipboardRequestId = 0;
 const pendingClipboardReads = new Map();
 
+const QUERY_RESULT_PREVIEW_LIMIT = 2500;
+
+let refreshRowsDebounceTimer = null;
+
 function getTypeIcon(affinity) {
   switch (affinity) {
     case 'INTEGER': return '#' ;
@@ -492,10 +496,10 @@ function buildShell() {
   app.addEventListener('click', handleClick);
   app.addEventListener('dblclick', handleDoubleClick);
   app.addEventListener('input', handleInput);
-  filterInput.addEventListener('input', async () => {
+  filterInput.addEventListener('input', () => {
     filter = filterInput.value;
     page = 1;
-    await refreshRows();
+    scheduleRefreshRows();
   });
   pageSizeSelect.addEventListener('change', async () => {
     pageSize = Number(pageSizeSelect.value);
@@ -539,27 +543,58 @@ function buildShell() {
     const startX = event.clientX;
     const th = handle.closest('th');
     const startWidth = th?.offsetWidth || 120;
+    const gridRows = Array.from(gridEl.querySelectorAll('tr'));
+    let rafHandle = 0;
+
     handle.classList.add('active');
-    resizeData = { columnName, startX, startWidth, handle, colIndex, gridEl };
+    resizeData = {
+      columnName,
+      startX,
+      startWidth,
+      newWidth: startWidth,
+      handle,
+      colIndex,
+      gridRows,
+    };
+
+    function applyColumnWidth() {
+      const activeResize = resizeData;
+      if (!activeResize) {
+        return;
+      }
+      const width = activeResize.newWidth;
+      for (const row of activeResize.gridRows) {
+        const cell = row.children[activeResize.colIndex];
+        if (cell) {
+          cell.style.width = `${width}px`;
+          cell.style.minWidth = `${width}px`;
+          cell.style.maxWidth = `${width}px`;
+        }
+      }
+      rafHandle = 0;
+    }
 
     function onMouseMove(e) {
       if (!resizeData) return;
       const diff = e.clientX - resizeData.startX;
       const newWidth = Math.max(60, resizeData.startWidth + diff);
+      if (newWidth === resizeData.newWidth) {
+        return;
+      }
+      resizeData.newWidth = newWidth;
       columnWidths[resizeData.columnName] = newWidth;
 
-      const allRows = resizeData.gridEl.querySelectorAll('tr');
-      for (const tr of allRows) {
-        const cell = tr.children[resizeData.colIndex];
-        if (cell) {
-          cell.style.width = `${newWidth}px`;
-          cell.style.minWidth = `${newWidth}px`;
-          cell.style.maxWidth = `${newWidth}px`;
-        }
+      if (!rafHandle) {
+        rafHandle = window.requestAnimationFrame(applyColumnWidth);
       }
     }
 
     function onMouseUp() {
+      if (rafHandle) {
+        window.cancelAnimationFrame(rafHandle);
+        applyColumnWidth();
+        rafHandle = 0;
+      }
       if (resizeData) {
         resizeData.handle?.classList.remove('active');
       }
@@ -787,7 +822,7 @@ async function handleInput(event) {
       delete columnFilters[columnName];
     }
     page = 1;
-    await refreshRows();
+    scheduleRefreshRows();
     focusColumnFilter(columnName);
     return;
   }
@@ -883,6 +918,17 @@ function handleLoadError(message, settings) {
 
 function getQueryOptions() {
   return { timeoutMs: editorSettings.queryTimeoutMs };
+}
+
+function scheduleRefreshRows() {
+  if (refreshRowsDebounceTimer) {
+    window.clearTimeout(refreshRowsDebounceTimer);
+  }
+
+  refreshRowsDebounceTimer = window.setTimeout(() => {
+    refreshRowsDebounceTimer = null;
+    void refreshRows();
+  }, 120);
 }
 
 function buildAutoCommitStatusSuffix() {
@@ -3153,6 +3199,12 @@ function arraysEqual(left, right) {
   return left.every((item, index) => item === right[index]);
 }
 
+function getQueryResultPreviewLimit() {
+  return editorSettings.maxRows > 0 && editorSettings.maxRows < QUERY_RESULT_PREVIEW_LIMIT
+    ? editorSettings.maxRows
+    : QUERY_RESULT_PREVIEW_LIMIT;
+}
+
 async function runSqlWorkspace() {
   clear(elements.queryOutput);
   setQueryMessage('');
@@ -3177,11 +3229,33 @@ async function runSqlWorkspace() {
       await refreshTables();
     }
 
-    const rowCount = results.reduce((sum, result) => sum + result.values.length, 0);
+    const previewLimit = getQueryResultPreviewLimit();
+    let rowCount = 0;
+    let totalTruncatedRows = 0;
+    let truncatedStatements = 0;
+
+    for (const [index, result] of results.entries()) {
+      const originalRowCount = result.values.length;
+      rowCount += originalRowCount;
+      if (previewLimit > 0 && originalRowCount > previewLimit) {
+        totalTruncatedRows += originalRowCount - previewLimit;
+        result.values.length = previewLimit;
+        result.__truncatedRows = originalRowCount - previewLimit;
+        result.__truncatedStatementIndex = index + 1;
+        truncatedStatements += 1;
+      } else {
+        result.__truncatedRows = 0;
+        result.__truncatedStatementIndex = index + 1;
+      }
+    }
+
     if (results.length > 0) {
+      const truncationMessage = truncatedStatements
+        ? ` · truncated ${totalTruncatedRows.toLocaleString()} of ${rowCount.toLocaleString()} rows to ${previewLimit.toLocaleString()} per result set`
+        : '';
       setQueryMessage(changed
-        ? `${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'} · database modified`
-        : `${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'}`,
+        ? `${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'} · database modified${truncationMessage}`
+        : `${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'}${truncationMessage}`,
       changed ? 'success' : 'info');
       for (const result of results) {
         elements.queryOutput.append(renderResultTable(result));
@@ -3208,6 +3282,7 @@ async function runSqlWorkspace() {
     setQueryMessage(message, 'error');
   }
 }
+
 
 function exportVisibleCsv() {
   const table = getActiveTable();
@@ -3271,6 +3346,21 @@ function renderResultTable(result) {
       children: row.map((value) => createElement('td', { text: describeValue(value) })),
     }));
   }
+
+  if (result.__truncatedRows > 0) {
+    tbody.append(createElement('tr', {
+      className: 'query-result-truncated',
+      children: [
+        createElement('td', {
+          attributes: {
+            colspan: String(result.columns.length),
+          },
+          text: `${result.__truncatedRows.toLocaleString()} additional row${result.__truncatedRows === 1 ? '' : 's'} omitted from query result ${result.__truncatedStatementIndex ? `(statement ${result.__truncatedStatementIndex})` : ''}.`,
+        }),
+      ],
+    }));
+  }
+
   tableElement.append(tbody);
   return tableElement;
 }
