@@ -203,7 +203,7 @@ function buildSystemPrompt(
   return [
     'You are the SQLite Database Editor participant. Ground database claims in the provided tools.',
     `Open databases: ${JSON.stringify(databases)}. ${selectedContext}`,
-    'When multiple databases are open, always provide databaseUri explicitly. Inspect focused schema before writing SQL.',
+    'When multiple databases are open, provide databaseUri (handle) explicitly. Inspect focused schema before writing SQL.',
     'Use databaseEditor_explain for performance advice and databaseEditor_profile for aggregate profiling.',
     accessMode === 'rw'
       ? 'Writes and migrations are allowed only through confirmed tools. Explain the target and impact before invoking them.'

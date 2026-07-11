@@ -15,6 +15,7 @@ export type OpenDatabaseSummary = {
 
 export type SqliteSelectionContext = {
   databaseUri: string;
+  databaseHandle?: string;
   objectName?: string;
   objectType?: 'table' | 'view';
   hasFilter?: boolean;
@@ -108,7 +109,7 @@ export class SqliteDocumentRegistry<TDocument extends RegistrySqliteDocument> {
         return right.lastActivationSequence - left.lastActivationSequence;
       })
       .map((entry) => ({
-        uri: entry.document.uri.toString(),
+        uri: entry.handle,
         name: basename(entry.document.uri.path),
         active: entry.document === activeDocument,
       }));
@@ -178,12 +179,14 @@ export class SqliteDocumentRegistry<TDocument extends RegistrySqliteDocument> {
     }
 
     const documentUri = document.uri.toString();
+    const databaseHandle = this.uriToHandle.get(documentUri);
     const selection = this.openDocuments.get(documentUri)?.selection;
     const filteredColumns = selection?.filteredColumns;
     const selectedColumns = selection?.selectedColumns;
     const selectedRowNumbers = selection?.selectedRowNumbers;
     return {
-      databaseUri: documentUri,
+      databaseUri: databaseHandle ?? documentUri,
+      databaseHandle,
       ...selection,
       ...(filteredColumns
         ? { filteredColumns: [...filteredColumns] }

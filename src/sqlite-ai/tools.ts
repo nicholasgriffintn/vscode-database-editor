@@ -2,11 +2,22 @@ import type * as vscode from 'vscode';
 
 import { getErrorMessage } from '../utilities/errors';
 import { escapeMarkdown, formatSqlCodeBlock } from '../utilities/markdown';
-import { basenameFromUri } from '../utilities/path';
-import { sqlLiteral } from '../utilities/sql';
 import type { SqlJsDatabase, SqlJsStatic } from './sqljs-host';
 import type { OpenDatabaseSummary, SqliteSelectionContext } from './sqlite-document-registry';
 import { capRows, isAllowedModification, isReadOnlyQuery, quoteIdentifier } from './sql-safety';
+import { compileSensitivePatterns, getColumns, inferRedactedOutputColumns, throwIfCancelled } from './tools/query-redaction';
+import {
+  DbContextInput,
+  describeDatabaseTarget,
+  getDatabaseContext,
+  sanitizeSelectionContext,
+} from './tools/database-context';
+import {
+  executeRows,
+  getColumnsInfo,
+  getRowCount,
+  getSchemaObjects,
+} from './tools/schema-helpers';
 
 export type SqliteToolDocument = {
   readonly uri: { toString(): string };
@@ -19,6 +30,7 @@ export type SqliteToolRegistry<TDocument extends SqliteToolDocument = SqliteTool
   listOpenDatabases(): OpenDatabaseSummary[];
   resolveDocument(uri?: string): TDocument | undefined;
   getSelectionContext(uri?: string): SqliteSelectionContext | undefined;
+  getDatabaseHandle(uri: string): string | undefined;
   applyCopilotDatabaseChange(document: TDocument, data: Uint8Array, label: string, baseRevision: number): Promise<void>;
 };
 
@@ -46,13 +58,6 @@ type CreateSqliteToolsOptions<TDocument extends SqliteToolDocument> = {
     timeoutMs: number;
     sensitiveColumnPatterns: string[];
   };
-};
-
-type DbContextInput = {
-  databaseUri?: string;
-  objectName?: string;
-  offset?: number;
-  limit?: number;
 };
 
 type QueryInput = {
@@ -169,6 +174,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
           const selection = sanitizeSelectionContext(options.registry.getSelectionContext(opened.document.uri.toString()));
           const contextInput = {
             ...(input ?? {}),
+            databaseUri: input?.databaseUri ?? selection?.databaseUri,
             objectName: input?.objectName ?? selection?.objectName,
           };
           return result({
@@ -205,7 +211,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
           const sensitivePatterns = compileSensitivePatterns(queryOptions.sensitiveColumnPatterns);
           const rows = executeRows(opened.db, input.query, rowLimit + 1, token, Date.now() + timeoutMs);
           const columns = rows.length > 0 ? Object.keys(rows[0]) : getColumns(opened.db, input.query);
-          const redactedOutputColumns = inferRedactedOutputColumns(input.query, columns, sensitivePatterns);
+          const redactedOutputColumns = inferRedactedOutputColumns(input.query, columns, sensitivePatterns, opened.db);
           const capped = capRows(rows, rowLimit, sensitivePatterns, redactedOutputColumns);
           return result({
             queryName: input.queryName,
@@ -412,399 +418,4 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
       }),
     },
   };
-}
-
-function sanitizeSelectionContext(selection: SqliteSelectionContext | undefined): SqliteSelectionContext | undefined {
-  if (!selection) {
-    return undefined;
-  }
-
-  const legacySelection = selection as SqliteSelectionContext & {
-    filter?: unknown;
-    columnFilters?: Record<string, unknown>;
-  };
-  const filteredColumns = selection.filteredColumns
-    ?? (legacySelection.columnFilters
-      ? Object.entries(legacySelection.columnFilters)
-        .filter(([, value]) => value !== undefined && value !== null && value !== '')
-        .map(([column]) => column)
-        .sort((left, right) => left.localeCompare(right))
-      : undefined);
-
-  return {
-    databaseUri: selection.databaseUri,
-    ...(selection.objectName ? { objectName: selection.objectName } : {}),
-    ...(selection.objectType ? { objectType: selection.objectType } : {}),
-    ...(selection.hasFilter || legacySelection.filter ? { hasFilter: true } : {}),
-    ...(filteredColumns?.length ? { filteredColumns: [...filteredColumns] } : {}),
-    ...(selection.sortColumn ? { sortColumn: selection.sortColumn, sortDirection: selection.sortDirection } : {}),
-    ...(selection.selectedColumns?.length ? { selectedColumns: [...selection.selectedColumns] } : {}),
-    ...(selection.selectedRowCount ? { selectedRowCount: selection.selectedRowCount } : {}),
-    ...(selection.selectedRowNumbers?.length ? { selectedRowNumbers: [...selection.selectedRowNumbers] } : {}),
-    ...(selection.selectedRowScope ? { selectedRowScope: selection.selectedRowScope } : {}),
-  };
-}
-
-function getDatabaseContext(document: SqliteToolDocument, db: SqlJsDatabase, input: DbContextInput): unknown {
-  const objects = getSchemaObjects(db, input.objectName);
-  const database = {
-    uri: document.uri.toString(),
-    name: basenameFromUri(document.uri.toString()),
-  };
-  if (!input.objectName) {
-    const offset = Math.max(0, Math.floor(input.offset ?? 0));
-    const limit = Math.max(1, Math.min(100, Math.floor(input.limit ?? 50)));
-    const page = objects.slice(offset, offset + limit).map(({ name, type }) => ({ name, type }));
-    const nextOffset = offset + page.length;
-    return {
-      database,
-      totalObjects: objects.length,
-      offset,
-      limit,
-      truncated: nextOffset < objects.length,
-      nextOffset: nextOffset < objects.length ? nextOffset : undefined,
-      objects: page,
-    };
-  }
-
-  return {
-    database,
-    totalObjects: objects.length,
-    truncated: false,
-    objects: objects.map((object) => ({
-      ...object,
-      rowCount: object.type === 'table' || object.type === 'view'
-        ? getRowCount(db, object.name)
-        : undefined,
-      columns: object.type === 'table' || object.type === 'view'
-        ? getColumnsInfo(db, object.name)
-        : [],
-      foreignKeys: object.type === 'table'
-        ? executeRows(db, `PRAGMA foreign_key_list(${quoteIdentifier(object.name)})`)
-        : [],
-      indexes: object.type === 'table'
-        ? getIndexes(db, object.name)
-        : [],
-      triggers: getTriggers(db, object.name),
-    })),
-  };
-}
-
-function getSchemaObjects(db: SqlJsDatabase, objectName?: string): Array<{ name: string; type: string; sql: string | null }> {
-  const rows = executeRows(
-    db,
-    'SELECT name, type, sql FROM sqlite_schema WHERE type IN (\'table\', \'view\') AND name NOT LIKE \'sqlite_%\' ORDER BY type, name',
-  ).map((row) => ({
-    name: String(row.name),
-    type: String(row.type),
-    sql: row.sql === null || row.sql === undefined ? null : String(row.sql),
-  }));
-
-  if (!objectName) {
-    return rows;
-  }
-
-  return rows.filter((row) => row.name === objectName);
-}
-
-function getColumnsInfo(db: SqlJsDatabase, objectName: string): unknown[] {
-  return executeRows(db, `PRAGMA table_info(${quoteIdentifier(objectName)})`).map((row) => ({
-    name: row.name,
-    type: row.type,
-    primaryKey: Number(row.pk) > 0,
-    nullable: Number(row.notnull) === 0,
-    defaultValue: row.dflt_value,
-  }));
-}
-
-function getIndexes(db: SqlJsDatabase, tableName: string): unknown[] {
-  return executeRows(db, `PRAGMA index_list(${quoteIdentifier(tableName)})`).map((index) => ({
-    ...index,
-    columns: executeRows(db, `PRAGMA index_info(${quoteIdentifier(String(index.name))})`),
-  }));
-}
-
-function getTriggers(db: SqlJsDatabase, tableName: string): unknown[] {
-  return executeRows(
-    db,
-    `SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ${sqlLiteral(tableName)} ORDER BY name`,
-  );
-}
-
-function getRowCount(
-  db: SqlJsDatabase,
-  objectName: string,
-  token?: vscode.CancellationToken,
-  deadline?: number,
-): number | null {
-  try {
-    const rows = executeRows(db, `SELECT COUNT(*) AS count FROM ${quoteIdentifier(objectName)}`, 1, token, deadline);
-    return Number(rows[0]?.count ?? 0);
-  } catch {
-    return null;
-  }
-}
-
-function executeRows(
-  db: SqlJsDatabase,
-  sql: string,
-  rowLimit?: number,
-  token?: vscode.CancellationToken,
-  deadline?: number,
-): Record<string, unknown>[] {
-  const statement = db.prepare(sql);
-  const rows: Record<string, unknown>[] = [];
-  try {
-    while (true) {
-      if (token?.isCancellationRequested) {
-        throw new Error('SQLite query was cancelled.');
-      }
-      if (deadline !== undefined && Date.now() >= deadline) {
-        throw new Error('SQLite query exceeded its execution time limit.');
-      }
-      if (!statement.step()) {
-        break;
-      }
-      rows.push(statement.getAsObject());
-      if (rowLimit !== undefined && rows.length >= rowLimit) {
-        break;
-      }
-    }
-  } finally {
-    statement.free();
-  }
-  return rows;
-}
-
-function inferRedactedOutputColumns(sql: string, columns: string[], sensitivePatterns: RegExp[]): Set<string> {
-  const redacted = new Set<string>();
-  const selectLists = extractSelectLists(sql);
-
-  selectLists.forEach((selectList) => {
-    const expressions = splitTopLevelComma(selectList);
-    expressions.forEach((expression, index) => {
-      if (!expressionReferencesSensitiveColumn(expression, sensitivePatterns)) {
-        return;
-      }
-
-      const outputName = getExplicitOutputName(expression);
-      if (outputName && columns.includes(outputName)) {
-        redacted.add(outputName);
-        return;
-      }
-
-      if (expressions.length === columns.length && columns[index]) {
-        redacted.add(columns[index]);
-      }
-    });
-  });
-
-  const maskedSql = maskSqlCommentsAndStringLiterals(sql);
-  const selectCount = maskedSql.match(/\bselect\b/gi)?.length ?? 0;
-  if (selectCount > 1 && sensitivePatterns.some((pattern) => pattern.test(maskedSql))) {
-    columns.forEach((column) => redacted.add(column));
-  }
-  return redacted;
-}
-
-function extractSelectLists(sql: string): string[] {
-  const selectLists: string[] = [];
-  let selectIndex = findTopLevelKeyword(sql, 'select');
-
-  while (selectIndex !== -1) {
-    const listStart = selectIndex + 'select'.length;
-    const compoundIndexes = ['union', 'intersect', 'except']
-      .map((keyword) => findTopLevelKeyword(sql, keyword, listStart))
-      .filter((index) => index >= listStart);
-    const nextCompoundIndex = compoundIndexes.length
-      ? Math.min(...compoundIndexes)
-      : -1;
-    const listEnd = [
-      findTopLevelKeyword(sql, 'from', listStart),
-      findTopLevelKeyword(sql, 'order', listStart),
-      findTopLevelKeyword(sql, 'limit', listStart),
-      nextCompoundIndex,
-      sql.length,
-    ]
-      .filter((index) => index >= listStart)
-      .reduce((earliest, index) => Math.min(earliest, index), sql.length);
-    const selectList = sql.slice(listStart, listEnd).trim();
-    if (selectList) {
-      selectLists.push(selectList);
-    }
-
-    if (nextCompoundIndex === -1) {
-      break;
-    }
-    selectIndex = findTopLevelKeyword(sql, 'select', nextCompoundIndex + 1);
-  }
-
-  return selectLists;
-}
-
-function findTopLevelKeyword(sql: string, keyword: string, startIndex = 0): number {
-  let quote: string | undefined;
-  let depth = 0;
-
-  for (let index = 0; index < sql.length; index += 1) {
-    const character = sql[index];
-    const next = sql[index + 1];
-    if (quote) {
-      if (quote === ']' && character === ']') {
-        quote = undefined;
-      } else if (character === quote) {
-        if (sql[index + 1] === quote) {
-          index += 1;
-        } else {
-          quote = undefined;
-        }
-      }
-      continue;
-    }
-
-    if (character === '\'' || character === '"' || character === '`' || character === '[') {
-      quote = character === '[' ? ']' : character;
-      continue;
-    }
-    if (character === '-' && next === '-') {
-      index += 2;
-      while (index < sql.length && sql[index] !== '\n') index += 1;
-      continue;
-    }
-    if (character === '/' && next === '*') {
-      index += 2;
-      while (index < sql.length && !(sql[index] === '*' && sql[index + 1] === '/')) index += 1;
-      index += 1;
-      continue;
-    }
-    if (character === '(') {
-      depth += 1;
-      continue;
-    }
-    if (character === ')') {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (index < startIndex || depth !== 0) {
-      continue;
-    }
-
-    const candidate = sql.slice(index, index + keyword.length);
-    const before = sql[index - 1];
-    const after = sql[index + keyword.length];
-    if (candidate.toLowerCase() === keyword
-      && (!before || !/[\w$]/.test(before))
-      && (!after || !/[\w$]/.test(after))) {
-      return index;
-    }
-  }
-
-  return -1;
-}
-
-function getExplicitOutputName(expression: string): string | undefined {
-  const match = /\s+(?:as\s+)?("(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|[A-Za-z_$][\w$]*)\s*$/i.exec(expression);
-  if (!match) {
-    return undefined;
-  }
-
-  const alias = match[1];
-  if (alias.startsWith('"') || alias.startsWith('`')) {
-    return alias.slice(1, -1).replaceAll(alias[0] + alias[0], alias[0]);
-  }
-  if (alias.startsWith('[')) {
-    return alias.slice(1, -1);
-  }
-  return alias;
-}
-
-function splitTopLevelComma(value: string): string[] {
-  const parts: string[] = [];
-  let current = '';
-  let quote: string | undefined;
-  let depth = 0;
-
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index];
-    if (quote) {
-      current += character;
-      if (character === quote) {
-        if (value[index + 1] === quote) {
-          current += value[index + 1];
-          index += 1;
-        } else {
-          quote = undefined;
-        }
-      }
-      continue;
-    }
-
-    if (character === '\'' || character === '"') {
-      quote = character;
-      current += character;
-      continue;
-    }
-    if (character === '(') depth += 1;
-    if (character === ')') depth = Math.max(0, depth - 1);
-    if (character === ',' && depth === 0) {
-      parts.push(current.trim());
-      current = '';
-      continue;
-    }
-    current += character;
-  }
-
-  if (current.trim()) {
-    parts.push(current.trim());
-  }
-  return parts;
-}
-
-function expressionReferencesSensitiveColumn(expression: string, sensitivePatterns: RegExp[]): boolean {
-  const sourceExpression = expression
-    .replace(/\s+as\s+[^\s]+$/i, '')
-    .replace(/\s+[^\s]+$/i, '');
-  return sensitivePatterns.some((pattern) => pattern.test(maskSqlCommentsAndStringLiterals(sourceExpression)));
-}
-
-function maskSqlCommentsAndStringLiterals(sql: string): string {
-  return sql
-    .replace(/--[^\n\r]*|\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/'([^']|'')*'/g, ' ');
-}
-
-function throwIfCancelled(token?: vscode.CancellationToken): void {
-  if (token?.isCancellationRequested) {
-    throw new Error('SQLite operation was cancelled.');
-  }
-}
-
-function compileSensitivePatterns(patterns: string[]): RegExp[] {
-  return patterns.flatMap((pattern) => {
-    try {
-      return [new RegExp(pattern, 'i')];
-    } catch {
-      return [];
-    }
-  });
-}
-
-function getColumns(db: SqlJsDatabase, sql: string): string[] {
-  const statement = db.prepare(sql);
-  try {
-    return statement.getColumnNames();
-  } finally {
-    statement.free();
-  }
-}
-
-function describeDatabaseTarget(registry: SqliteToolRegistry, requestedUri?: string): string {
-  const databases = registry.listOpenDatabases();
-  const database = requestedUri
-    ? databases.find((candidate) => candidate.uri === requestedUri)
-    : databases.length === 1 ? databases[0] : undefined;
-  const uri = database?.uri ?? requestedUri ?? 'an explicitly selected database';
-  return database
-    ? `**${escapeMarkdown(database.name)}** (\`${escapeMarkdown(uri)}\`)`
-    : `\`${escapeMarkdown(uri)}\``;
 }
