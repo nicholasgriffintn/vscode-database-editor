@@ -1,4 +1,4 @@
-import { isReadOnlyStatement } from './sql-utils.mjs';
+import { isReadOnlyStatement } from './sql.mjs';
 
 export function executeSqlStatements(db, statements, options = {}) {
   const context = createExecutionContext(options);

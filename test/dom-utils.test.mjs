@@ -37,7 +37,7 @@ globalThis.document = {
   },
 };
 
-const { createElement, createSvgElement } = await import('../media/dom-utils.mjs');
+const { createElement, createSvgElement } = await import('../media/utilities/dom.mjs');
 
 test('createElement applies style declarations without setting a style attribute', () => {
   const element = createElement('td', {

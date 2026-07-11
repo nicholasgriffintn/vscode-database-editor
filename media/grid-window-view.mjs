@@ -1,4 +1,4 @@
-import { createElement } from './dom-utils.mjs';
+import { createElement } from './utilities/dom.mjs';
 
 export function createGridWindowSpacer({ columnCount, height }) {
   return createElement('tr', {

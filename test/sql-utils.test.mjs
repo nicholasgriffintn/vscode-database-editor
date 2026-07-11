@@ -15,7 +15,7 @@ import {
   parseCellInput,
   quoteIdentifier,
   toCsv,
-} from '../media/sql-utils.mjs';
+} from '../media/sql.mjs';
 
 const columns = [
   { name: 'id', type: 'INTEGER' },

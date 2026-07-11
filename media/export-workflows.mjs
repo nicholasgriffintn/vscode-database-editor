@@ -1,4 +1,4 @@
-import { safeFileName } from './file-utils.mjs';
+import { safeFileName } from './utilities/file.mjs';
 
 export function createSqlExportState() {
   return { requestCounter: 0, activeRequestId: null };

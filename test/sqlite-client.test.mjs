@@ -16,7 +16,7 @@ import {
   runWrite,
   runWriteBatch,
 } from '../media/sqlite-client.mjs';
-import { analyzeSqlScript, buildDelete, buildInsert, buildTableSelect, buildUpdate } from '../media/sql-utils.mjs';
+import { analyzeSqlScript, buildDelete, buildInsert, buildTableSelect, buildUpdate } from '../media/sql.mjs';
 
 async function createDatabase() {
   const SQL = await initSqlJs({

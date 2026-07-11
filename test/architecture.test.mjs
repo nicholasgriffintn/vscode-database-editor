@@ -30,8 +30,13 @@ test('SQL export orchestration uses shared SQL, cancellation, schema, sink, and 
 test('webview orchestration imports generic error and collection helpers', async () => {
   const source = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
 
-  assert.match(source, /from '\.\/error-utils\.mjs'/);
-  assert.match(source, /from '\.\/array-utils\.mjs'/);
-  assert.match(source, /from '\.\/text-control-utils\.mjs'/);
+  assert.match(source, /from '\.\/utilities\/errors\.mjs'/);
+  assert.match(source, /from '\.\/utilities\/array\.mjs'/);
+  assert.match(source, /from '\.\/utilities\/text-control\.mjs'/);
   assert.doesNotMatch(source, /function (?:getErrorMessage|arraysEqual|isTextControl|replaceTextControlSelection|deleteTextControlSelection|getSelectedTextInControl|createSvgElement)\(/);
+});
+
+test('media shared helpers use the utilities directory instead of utils suffixes', async () => {
+  const mediaFiles = await readdir(new URL('../media/', import.meta.url));
+  assert.deepEqual(mediaFiles.filter((name) => /-utils\.mjs$/.test(name)), []);
 });

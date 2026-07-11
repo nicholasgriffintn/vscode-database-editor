@@ -6,7 +6,7 @@ import {
   getSelectedTextInControl,
   isTextControl,
   replaceTextControlSelection,
-} from '../media/text-control-utils.mjs';
+} from '../media/utilities/text-control.mjs';
 
 test('shared text-control helpers preserve selection semantics for cut and paste', async () => {
   const target = createTextControl('hello', 1, 4);

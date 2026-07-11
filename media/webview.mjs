@@ -6,10 +6,10 @@ import {
   getInstantCommitAction,
   normalizeEditorSettings,
 } from './editor-settings.mjs';
-import { arraysEqual } from './array-utils.mjs';
-import { createElement, createSvgElement, clear } from './dom-utils.mjs';
-import { getErrorMessage } from './error-utils.mjs';
-import { applyTextEditingShortcut } from './text-control-utils.mjs';
+import { arraysEqual } from './utilities/array.mjs';
+import { createElement, createSvgElement, clear } from './utilities/dom.mjs';
+import { getErrorMessage } from './utilities/errors.mjs';
+import { applyTextEditingShortcut } from './utilities/text-control.mjs';
 import {
   createSqlExportState,
   getSqlExportUiState,
@@ -37,8 +37,8 @@ import {
   getBlobFileExtension,
   blobToObjectURL,
   isImageBlob,
-} from './blob-utils.mjs';
-import { safeFileName } from './file-utils.mjs';
+} from './blob.mjs';
+import { safeFileName } from './utilities/file.mjs';
 import {
   getCellInteraction,
   getCellClipboardText,
@@ -105,7 +105,7 @@ import {
   describeValue,
   parseCellInput,
   toCsv,
-} from './sql-utils.mjs';
+} from './sql.mjs';
 import { prepareSqlWorkspaceResults } from './sql-workspace.mjs';
 import {
   buildAddColumn,

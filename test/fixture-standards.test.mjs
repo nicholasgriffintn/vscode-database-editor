@@ -12,7 +12,7 @@ import {
   readTableMetadata,
   runWrite,
 } from '../media/sqlite-client.mjs';
-import { buildDelete, buildTableSelect, buildUpdate } from '../media/sql-utils.mjs';
+import { buildDelete, buildTableSelect, buildUpdate } from '../media/sql.mjs';
 import { assertFixtureStandards } from '../scripts/fixture-standards.mjs';
 
 const execFileAsync = promisify(execFile);

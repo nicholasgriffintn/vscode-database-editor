@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { safeFileName } from '../media/file-utils.mjs';
+import { safeFileName } from '../media/utilities/file.mjs';
 
 test('normalises unsafe file name characters', () => {
   assert.equal(safeFileName('../data/main.sqlite:people'), 'data-main.sqlite-people');

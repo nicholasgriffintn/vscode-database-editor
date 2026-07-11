@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { arraysEqual } from '../media/array-utils.mjs';
-import { getErrorMessage } from '../media/error-utils.mjs';
+import { arraysEqual } from '../media/utilities/array.mjs';
+import { getErrorMessage } from '../media/utilities/errors.mjs';
 
 test('shared media utilities compare ordered collections and normalize errors', () => {
   assert.equal(arraysEqual(['a', 'b'], ['a', 'b']), true);

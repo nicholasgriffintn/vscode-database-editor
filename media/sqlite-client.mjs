@@ -3,7 +3,7 @@ import {
   assertSqlScriptCanExport,
   buildTableCount,
   quoteIdentifier,
-} from './sql-utils.mjs';
+} from './sql.mjs';
 import { executeSqlScript } from './sql-workspace.mjs';
 
 export function configureDatabase(db) {
