@@ -85,6 +85,14 @@ export const SQLITE_TOOL_NAMES = [
 
 const QUERY_ROW_LIMIT = 200;
 
+export function configureDatabase(db: SqlJsDatabase): void {
+  db.run('PRAGMA foreign_keys = ON');
+  const value = db.exec('PRAGMA foreign_keys')[0]?.values?.[0]?.[0];
+  if (Number(value) !== 1) {
+    throw new Error('Could not enable SQLite foreign key enforcement for this database session.');
+  }
+}
+
 export function createSqliteTools<TDocument extends SqliteToolDocument>(
   options: CreateSqliteToolsOptions<TDocument>,
 ): SqliteTools {
@@ -121,7 +129,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
 
     const SQL = await options.loadSqlJs(options.extensionUri);
     const db = new SQL.Database(document.getData());
-    db.run('PRAGMA foreign_keys = ON');
+    configureDatabase(db);
     return {
       document,
       db,

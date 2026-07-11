@@ -1,5 +1,14 @@
 import { analyzeSqlScript, buildTableCount, quoteIdentifier } from './sql-utils.mjs';
 
+export function configureDatabase(db) {
+  db.run('PRAGMA foreign_keys = ON');
+  const result = db.exec('PRAGMA foreign_keys');
+  const value = result[0]?.values?.[0]?.[0];
+  if (Number(value) !== 1) {
+    throw new Error('Could not enable SQLite foreign key enforcement for this database session.');
+  }
+}
+
 export function getSchemaObjects(db) {
   return queryAll(db, `
     SELECT name, type, tbl_name AS tableName, sql

@@ -68,7 +68,7 @@ test('discovers SQLite objects and table metadata', async () => {
   db.close();
 });
 
-test.todo('configures every database connection with enforced foreign keys', async () => {
+test('configures every database connection with enforced foreign keys', async () => {
   const db = await createDatabase();
   const { configureDatabase } = await import('../media/sqlite-client.mjs');
 
@@ -96,6 +96,21 @@ test.todo('configures every database connection with enforced foreign keys', asy
     /const nextDatabase = new SQL\.Database\([^;]+\);\s*configureDatabase\(nextDatabase\);/,
   );
   assert.match(toolsSource, /configureDatabase\(db\);/);
+});
+
+test('database configuration fails visibly when foreign keys remain disabled', async () => {
+  const { configureDatabase } = await import('../media/sqlite-client.mjs');
+  const db = {
+    run() {},
+    exec() {
+      return [{ columns: ['foreign_keys'], values: [[0]] }];
+    },
+  };
+
+  assert.throws(
+    () => configureDatabase(db),
+    /could not enable SQLite foreign key enforcement/i,
+  );
 });
 
 test.todo('discovers virtual and stored generated columns as read-only metadata', async () => {

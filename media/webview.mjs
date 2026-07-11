@@ -59,6 +59,7 @@ import {
   layoutSchemaGraph,
 } from './schema-graph.mjs';
 import {
+  configureDatabase,
   getSchemaObjects,
   queryAll,
   readTableMetadata,
@@ -875,6 +876,7 @@ async function openDatabase(name, data, { dirty = false, resetViewState = true }
     elements.status.textContent = 'Opening database...';
     SQL ??= await initSqlJs({ locateFile: () => wasmUri });
     const nextDatabase = new SQL.Database(new Uint8Array(data));
+    configureDatabase(nextDatabase);
     for (const url of gridBlobUrls) {
       URL.revokeObjectURL(url);
     }
