@@ -32,8 +32,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run tests
-        run: pnpm test
+      - name: Run unit tests
+        run: pnpm run test:unit
+
+      - name: Run Extension Development Host integration tests
+        run: xvfb-run -a pnpm run test:integration
 
       - name: Build VSIX
         run: pnpm run vsce:package

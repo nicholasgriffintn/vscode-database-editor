@@ -27,7 +27,17 @@ import { createEditorWebviewHtml } from './utilities/webview-html';
 
 const viewType = 'databaseEditor.sqlite';
 
-export function activate(context: vscode.ExtensionContext): void {
+export interface SqliteExtensionTestApi {
+  readonly onDidPostWebviewMessage: vscode.Event<{ uri: string; message: ExtensionMessage }>;
+  waitForDocument(uri: string): Promise<void>;
+  waitForDocumentClosed(uri: string): Promise<void>;
+  getDocumentSnapshot(uri: string): { data: Uint8Array; revision: number };
+  sendWebviewMessage(uri: string, message: WebviewMessage): Promise<void>;
+  saveAs(uri: string, destination: vscode.Uri): Promise<void>;
+  restoreFromBackup(uri: string, destination: vscode.Uri): Promise<{ data: Uint8Array; revision: number; dirty: boolean }>;
+}
+
+export function activate(context: vscode.ExtensionContext): SqliteExtensionTestApi {
   const provider = new SqliteEditorProvider(context);
   const {
     getCopilotEnabled,
@@ -94,6 +104,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.lm.registerTool('databaseEditor_migrate', tools.migrate),
     sqliteParticipant,
   );
+
+  return provider.createTestApi();
 }
 
 export function deactivate(): void {
@@ -102,12 +114,51 @@ export function deactivate(): void {
 
 class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument> {
   private readonly changeEmitter = new vscode.EventEmitter<SnapshotChangeEvent<SqliteDocument>>();
+  private readonly postedMessageEmitter = new vscode.EventEmitter<{ uri: string; message: ExtensionMessage }>();
   private readonly registry = new SqliteDocumentRegistry<SqliteDocument>();
+  private readonly pendingSaveRequests = new WeakMap<SqliteDocument, string>();
   private saveRequestCounter = 0;
 
   readonly onDidChangeCustomDocument = this.changeEmitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  createTestApi(): SqliteExtensionTestApi {
+    return {
+      onDidPostWebviewMessage: this.postedMessageEmitter.event,
+      waitForDocument: async (uri) => {
+        await this.waitForDocumentState(uri, true);
+      },
+      waitForDocumentClosed: async (uri) => {
+        await this.waitForDocumentState(uri, false);
+      },
+      getDocumentSnapshot: (uri) => this.getRequiredDocument(uri).getSnapshot(),
+      sendWebviewMessage: async (uri, message) => {
+        const document = this.getRequiredDocument(uri);
+        const panel = this.registry.getPanels(document)[0];
+        if (!panel) {
+          throw new Error(`No custom editor panel is open for ${uri}`);
+        }
+        await this.handleWebviewMessage(document, panel, message);
+      },
+      saveAs: async (uri, destination) => {
+        await this.saveCustomDocumentAs(this.getRequiredDocument(uri), destination);
+      },
+      restoreFromBackup: async (uri, destination) => {
+        const document = this.getRequiredDocument(uri);
+        const backup = await this.backupCustomDocument(document, { destination });
+        const restored = await this.openCustomDocument(document.uri, {
+          backupId: backup.id,
+          untitledDocumentData: undefined,
+        });
+        const snapshot = restored.getSnapshot();
+        const result = { ...snapshot, dirty: restored.isDirty() };
+        restored.dispose();
+        await backup.delete();
+        return result;
+      },
+    };
+  }
 
   async openCustomDocument(
     uri: vscode.Uri,
@@ -133,7 +184,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
 
     const configurationSubscription = vscode.workspace.onDidChangeConfiguration(async (event) => {
       if (event.affectsConfiguration('databaseEditor', document.uri)) {
-        await webview.postMessage({
+        await this.postWebviewMessage(document, webviewPanel, {
           type: 'settingsChanged',
           settings: this.getEditorSettings(document.uri),
         });
@@ -142,7 +193,17 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     webviewPanel.onDidDispose(() => configurationSubscription.dispose());
 
     webview.onDidReceiveMessage(async (message: WebviewMessage) => {
-      switch (message.type) {
+      await this.handleWebviewMessage(document, webviewPanel, message);
+    });
+  }
+
+  private async handleWebviewMessage(
+    document: SqliteDocument,
+    webviewPanel: vscode.WebviewPanel,
+    message: WebviewMessage,
+  ): Promise<void> {
+    const webview = webviewPanel.webview;
+    switch (message.type) {
         case 'ready':
           await this.postDocument(webviewPanel, document);
           break;
@@ -166,11 +227,16 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
           break;
         case 'requestSave':
           try {
-            await this.saveCustomDocument(document, undefined, { requestId: message.requestId });
+            this.pendingSaveRequests.set(document, message.requestId);
+            const savedUri = await vscode.workspace.save(document.uri);
+            if (!savedUri && this.pendingSaveRequests.has(document)) {
+              throw new Error('Save was cancelled.');
+            }
           } catch (error) {
+            this.pendingSaveRequests.delete(document);
             const failure = createDatabaseSaveFailedMessage(error, document.getRevision(), message.requestId);
-            await webview.postMessage(failure);
-            await vscode.window.showErrorMessage(failure.message);
+            await this.postWebviewMessage(document, webviewPanel, failure);
+            void vscode.window.showErrorMessage(failure.message);
           }
           break;
         case 'error':
@@ -186,7 +252,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
           await vscode.env.clipboard.writeText(message.text);
           break;
         case 'clipboardRead':
-          await webview.postMessage({
+          await this.postWebviewMessage(document, webviewPanel, {
             type: 'clipboardText',
             requestId: message.requestId,
             text: await vscode.env.clipboard.readText(),
@@ -199,7 +265,6 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
           await vscode.commands.executeCommand('redo');
           break;
       }
-    });
   }
 
   async saveCustomDocument(
@@ -210,17 +275,24 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     if (cancellation?.isCancellationRequested) {
       throw new vscode.CancellationError();
     }
-    const requestId = options.requestId ?? this.createSaveRequestId('save');
+    const requestId = options.requestId
+      ?? this.pendingSaveRequests.get(document)
+      ?? this.createSaveRequestId('save');
+    this.pendingSaveRequests.delete(document);
     const snapshot = document.getSnapshot();
     await vscode.workspace.fs.writeFile(document.uri, snapshot.data);
     await document.enqueueMutation(async () => {
       document.markSaved(snapshot.data);
+      const hasNewerRevision = document.getRevision() !== snapshot.revision;
       await this.postToDocumentPanels(document, createDatabaseSavedMessage({
         dirty: document.isDirty(),
         savedRevision: snapshot.revision,
         currentRevision: document.getRevision(),
         requestId,
       }));
+      if (hasNewerRevision) {
+        setTimeout(() => this.changeEmitter.fire({ document }), 0);
+      }
     });
   }
 
@@ -324,7 +396,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     const settings = this.getEditorSettings(document.uri);
     const data = document.getData();
     if (settings.maxFileSizeMb > 0 && data.byteLength > settings.maxFileSizeMb * 1024 * 1024) {
-      await panel.webview.postMessage({
+      await this.postWebviewMessage(document, panel, {
         type: 'loadError',
         message: `Database is ${(data.byteLength / 1024 / 1024).toFixed(1)} MB, above the configured ${settings.maxFileSizeMb} MB WebAssembly load limit. Raise databaseEditor.maxFileSizeMb or set it to 0 to open this file.`,
         settings,
@@ -332,7 +404,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       return;
     }
 
-    await panel.webview.postMessage({
+    await this.postWebviewMessage(document, panel, {
       type: 'loadDatabase',
       name: vscode.workspace.asRelativePath(document.uri),
       data: toArrayBuffer(data),
@@ -402,8 +474,35 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
 
   private async postToDocumentPanels(document: SqliteDocument, message: ExtensionMessage): Promise<void> {
     await Promise.allSettled(
-      this.registry.getPanels(document).map((panel) => panel.webview.postMessage(message)),
+      this.registry.getPanels(document).map((panel) => this.postWebviewMessage(document, panel, message)),
     );
+  }
+
+  private postWebviewMessage(
+    document: SqliteDocument,
+    panel: vscode.WebviewPanel,
+    message: ExtensionMessage,
+  ): Thenable<boolean> {
+    this.postedMessageEmitter.fire({ uri: document.uri.toString(), message });
+    return panel.webview.postMessage(message);
+  }
+
+  private getRequiredDocument(uri: string): SqliteDocument {
+    const document = this.registry.resolveDocument(uri);
+    if (!document) {
+      throw new Error(`No open SQLite document matches ${uri}`);
+    }
+    return document;
+  }
+
+  private async waitForDocumentState(uri: string, expectedOpen: boolean): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Boolean(this.registry.resolveDocument(uri)) !== expectedOpen) {
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for custom document ${uri} to ${expectedOpen ? 'open' : 'close'}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
   }
 
   private async saveTextDocument(document: SqliteDocument, message: SaveTextMessage): Promise<void> {

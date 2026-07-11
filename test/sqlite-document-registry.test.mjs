@@ -77,7 +77,8 @@ test('registry stores privacy-safe selection context for the active database', (
   });
 
   assert.deepEqual(registry.getSelectionContext(), {
-    databaseUri: 'file:///fixture.sqlite',
+    databaseUri: 'db-1',
+    databaseHandle: 'db-1',
     objectName: 'people',
     objectType: 'table',
     hasFilter: true,
@@ -108,12 +109,12 @@ test('registry resolves active custom editor from active panel, not visible pane
     openDatabases,
     [
       {
-        uri: 'file:///visible.sqlite',
+        uri: 'db-1',
         name: 'visible.sqlite',
         active: true,
       },
       {
-        uri: 'file:///inactive.sqlite',
+        uri: 'db-2',
         name: 'inactive.sqlite',
         active: false,
       },
@@ -138,9 +139,9 @@ test('registry updates active document when activation moves between side-by-sid
 
   assert.equal(registry.getActiveDocumentUri(), secondDocument.uri.toString());
   const openDatabases = registry.listOpenDatabases();
-  assert.equal(openDatabases[0].uri, secondDocument.uri.toString());
+  assert.equal(openDatabases[0].uri, 'db-2');
   assert.equal(openDatabases[0].active, true);
-  assert.equal(openDatabases[1].uri, firstDocument.uri.toString());
+  assert.equal(openDatabases[1].uri, 'db-1');
   assert.equal(openDatabases[1].active, false);
 });
 
@@ -158,9 +159,9 @@ test('registry falls back deterministically when no panel is active', () => {
 
   const openDatabases = registry.listOpenDatabases();
   assert.deepEqual(openDatabases.map((entry) => entry.uri), [
-    thirdDocument.uri.toString(),
-    secondDocument.uri.toString(),
-    firstDocument.uri.toString(),
+    'db-3',
+    'db-2',
+    'db-1',
   ]);
   assert.equal(openDatabases[0].active, true);
   assert.equal(openDatabases[1].active, false);
@@ -186,7 +187,7 @@ test('registry clears disposed panel and falls back to remaining open database',
   const openDatabases = registry.listOpenDatabases();
   assert.deepEqual(openDatabases, [
     {
-      uri: secondDocument.uri.toString(),
+      uri: 'db-2',
       name: 'second.sqlite',
       active: true,
     },
