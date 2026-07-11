@@ -67,6 +67,8 @@ import {
 } from './query-history.mjs';
 import { getDirtyStatusText, getSaveButtonState } from './save-state.mjs';
 import { getGridColumnCount, getGridEmptyStateKind } from './grid-empty-state.mjs';
+import { getEvictedGridResources, getGridWindow } from './grid-window.mjs';
+import { createGridWindowSpacer } from './grid-window-view.mjs';
 import {
   buildSchemaGraphModel,
   getSchemaGraphEdgePath,
@@ -162,13 +164,14 @@ let pinnedColumns = new Set();
 let columnWidths = {};
 
 let pinnedRows = new Set();
-/** @type {string[]} */
-let gridBlobUrls = [];
+/** @type {Map<Uint8Array, string>} */
+let gridBlobUrls = new Map();
 let clipboardRequestId = 0;
 const pendingClipboardReads = new Map();
 let isRefreshingRows = false;
 let isLoadingMoreRows = false;
 let infiniteScrollCheckFrame = 0;
+let gridWindowRenderFrame = 0;
 let lastGridScrollTop = 0;
 let isScrollingTowardBottom = true;
 
@@ -559,9 +562,11 @@ function buildShell() {
     const nextScrollTop = grid.scrollTop;
     if (nextScrollTop > lastGridScrollTop) {
       isScrollingTowardBottom = true;
+      scheduleGridWindowRender();
       scheduleInfiniteScrollCheck();
     } else if (nextScrollTop < lastGridScrollTop) {
       isScrollingTowardBottom = false;
+      scheduleGridWindowRender();
     }
     lastGridScrollTop = nextScrollTop;
   });
@@ -914,10 +919,10 @@ async function openDatabase(name, data, { dirty = false, revision = 0, resetView
     SQL ??= await initSqlJs({ locateFile: () => wasmUri });
     const nextDatabase = new SQL.Database(new Uint8Array(data));
     configureDatabase(nextDatabase);
-    for (const url of gridBlobUrls) {
+    for (const url of gridBlobUrls.values()) {
       URL.revokeObjectURL(url);
     }
-    gridBlobUrls = [];
+    gridBlobUrls.clear();
     db?.close();
     db = nextDatabase;
     rowCountCache.clear();
@@ -1725,27 +1730,15 @@ function getVisibleRowOffset() {
   return editorSettings.autoPagination ? 0 : (page - 1) * pageSize;
 }
 
-function renderGrid({ appendFrom = null } = {}) {
+function renderGrid({ bodyOnly = false } = {}) {
   const table = getActiveTable();
   if (!table) {
     return;
   }
-  const isAppend = Number.isInteger(appendFrom) && appendFrom > 0;
 
   elements.copyRowsFormat.disabled = visibleRows.length === 0;
 
-  if (!isAppend) {
-    for (const url of gridBlobUrls) {
-      URL.revokeObjectURL(url);
-    }
-    gridBlobUrls = [];
-  }
-  const gridBlobUrlsLocal = [];
-
-  const tableElement = createElement('table', { className: 'data-grid' });
-  const thead = createElement('thead');
-  const headerRow = createElement('tr', { className: 'column-heading-row' });
-  const filterRow = createElement('tr', { className: 'column-filter-row' });
+  const retainedBlobUrlKeys = new Set();
 
   const pinnedColStyles = getPinnedColumnLayout({
     columns: table.columns,
@@ -1754,121 +1747,129 @@ function renderGrid({ appendFrom = null } = {}) {
     rowNumberWidth: columnWidths.__rowNumber || ROW_NUMBER_COLUMN_WIDTH,
   });
   const rowNumberStyle = getRowNumberColumnStyle({ columnWidth: columnWidths.__rowNumber });
-
   const selectAllState = getSelectAllRowsState({ visibleRows, selectedRowKeys });
-  const selectAllCheckbox = createElement('input', {
-    className: 'row-select-checkbox',
-    title: selectAllState.checked ? 'Deselect visible rows' : 'Select visible rows',
-    attributes: {
-      type: 'checkbox',
-      'data-select-all-rows': 'true',
-      checked: selectAllState.checked ? 'true' : undefined,
-      disabled: visibleRows.length === 0 ? 'true' : undefined,
-      'aria-label': 'Select all visible rows',
-    },
-  });
-  headerRow.append(createElement('th', {
-    className: 'row-number-header',
-    style: rowNumberStyle,
-    children: [
-      createElement('div', {
-        className: 'column-header',
-        children: [
-          selectAllCheckbox,
-          createElement('span', { className: 'column-name row-number-heading-label', text: '#' }),
-        ],
-      }),
-      createElement('div', {
-        className: 'col-resize-handle',
-        attributes: { 'data-resize-column': '__rowNumber' },
-      }),
-    ],
-  }));
-  filterRow.append(createElement('th', {
-    className: 'row-number-header',
-    style: rowNumberStyle,
-    text: '',
-  }));
 
-  for (const column of table.columns) {
-    const isPinned = pinnedColumns.has(column.name);
-    const colWidth = columnWidths[column.name];
+  let tableElement = bodyOnly ? elements.grid.querySelector('.data-grid') : null;
+  if (!tableElement) {
+    tableElement = createElement('table', { className: 'data-grid' });
+    const thead = createElement('thead');
+    const headerRow = createElement('tr', { className: 'column-heading-row' });
+    const filterRow = createElement('tr', { className: 'column-filter-row' });
 
-    const sortMarker = sortColumn === column.name ? (sortDirection === 'asc' ? ' \u25B2' : ' \u25BC') : '';
-    const colStyle = isPinned
-      ? getPinnedCellStyle({ columnLayout: pinnedColStyles[column.name], zIndex: 45 })
-      : getGridColumnStyle({ columnWidth: colWidth });
+    const selectAllCheckbox = createElement('input', {
+      className: 'row-select-checkbox',
+      title: selectAllState.checked ? 'Deselect visible rows' : 'Select visible rows',
+      attributes: {
+        type: 'checkbox',
+        'data-select-all-rows': 'true',
+        checked: selectAllState.checked ? 'true' : undefined,
+        disabled: visibleRows.length === 0 ? 'true' : undefined,
+        'aria-label': 'Select all visible rows',
+      },
+    });
     headerRow.append(createElement('th', {
-      className: isPinned ? 'pinned' : '',
-      style: colStyle,
+      className: 'row-number-header',
+      style: rowNumberStyle,
       children: [
         createElement('div', {
           className: 'column-header',
-          title: buildColumnTitle(column),
           children: [
-            createElement('button', {
-              className: 'column-sort-button',
-              attributes: { type: 'button', 'data-sort-column': column.name },
-              children: [
-                createElement('span', { className: 'column-name', text: `${column.name}${sortMarker}` }),
-              ],
-            }),
-            createElement('span', {
-              className: 'column-badges',
-              children: [
-                ...getColumnBadges(column),
-                createElement('button', {
-                  className: `pin-button${isPinned ? ' pinned' : ''}`,
-                  text: '\u{1F4CC}',
-                  title: isPinned ? 'Unpin column' : 'Pin column to left',
-                  attributes: { type: 'button', 'data-pin-column': column.name },
-                }),
-              ],
-            }),
+            selectAllCheckbox,
+            createElement('span', { className: 'column-name row-number-heading-label', text: '#' }),
           ],
         }),
         createElement('div', {
           className: 'col-resize-handle',
-          attributes: { 'data-resize-column': column.name },
+          attributes: { 'data-resize-column': '__rowNumber' },
         }),
       ],
     }));
-    const filterStyle = isPinned
-      ? getPinnedCellStyle({ columnLayout: pinnedColStyles[column.name], zIndex: 42 })
-      : getGridColumnStyle({ columnWidth: colWidth });
     filterRow.append(createElement('th', {
-      className: isPinned ? 'pinned' : '',
-      style: filterStyle,
-      children: [
-        createElement('input', {
-          className: 'column-filter-input',
-          attributes: {
-            type: 'search',
-            placeholder: 'Filter',
-            value: columnFilters[column.name] ?? '',
-            'data-column-filter': column.name,
-          },
-        }),
-      ],
+      className: 'row-number-header',
+      style: rowNumberStyle,
+      text: '',
     }));
-  }
 
-  if (table.type === 'table') {
-    headerRow.append(createElement('th', {
-      children: [
-        createElement('div', {
-          className: 'column-header row-actions-heading',
-          children: [
-            createElement('span', { className: 'column-name', text: 'actions' }),
-          ],
-        }),
-      ],
-    }));
-    filterRow.append(createElement('th', { className: 'row-actions-filter-heading', text: '' }));
-  }
+    for (const column of table.columns) {
+      const isPinned = pinnedColumns.has(column.name);
+      const colWidth = columnWidths[column.name];
 
-  thead.append(headerRow, filterRow);
-  tableElement.append(thead);
+      const sortMarker = sortColumn === column.name ? (sortDirection === 'asc' ? ' \u25B2' : ' \u25BC') : '';
+      const colStyle = isPinned
+        ? getPinnedCellStyle({ columnLayout: pinnedColStyles[column.name], zIndex: 45 })
+        : getGridColumnStyle({ columnWidth: colWidth });
+      headerRow.append(createElement('th', {
+        className: isPinned ? 'pinned' : '',
+        style: colStyle,
+        children: [
+          createElement('div', {
+            className: 'column-header',
+            title: buildColumnTitle(column),
+            children: [
+              createElement('button', {
+                className: 'column-sort-button',
+                attributes: { type: 'button', 'data-sort-column': column.name },
+                children: [
+                  createElement('span', { className: 'column-name', text: `${column.name}${sortMarker}` }),
+                ],
+              }),
+              createElement('span', {
+                className: 'column-badges',
+                children: [
+                  ...getColumnBadges(column),
+                  createElement('button', {
+                    className: `pin-button${isPinned ? ' pinned' : ''}`,
+                    text: '\u{1F4CC}',
+                    title: isPinned ? 'Unpin column' : 'Pin column to left',
+                    attributes: { type: 'button', 'data-pin-column': column.name },
+                  }),
+                ],
+              }),
+            ],
+          }),
+          createElement('div', {
+            className: 'col-resize-handle',
+            attributes: { 'data-resize-column': column.name },
+          }),
+        ],
+      }));
+      const filterStyle = isPinned
+        ? getPinnedCellStyle({ columnLayout: pinnedColStyles[column.name], zIndex: 42 })
+        : getGridColumnStyle({ columnWidth: colWidth });
+      filterRow.append(createElement('th', {
+        className: isPinned ? 'pinned' : '',
+        style: filterStyle,
+        children: [
+          createElement('input', {
+            className: 'column-filter-input',
+            attributes: {
+              type: 'search',
+              placeholder: 'Filter',
+              value: columnFilters[column.name] ?? '',
+              'data-column-filter': column.name,
+            },
+          }),
+        ],
+      }));
+    }
+
+    if (table.type === 'table') {
+      headerRow.append(createElement('th', {
+        children: [
+          createElement('div', {
+            className: 'column-header row-actions-heading',
+            children: [
+              createElement('span', { className: 'column-name', text: 'actions' }),
+            ],
+          }),
+        ],
+      }));
+      filterRow.append(createElement('th', { className: 'row-actions-filter-heading', text: '' }));
+    }
+
+    thead.append(headerRow, filterRow);
+    tableElement.append(thead);
+  }
 
   const columnCount = getGridColumnCount({ columnCount: table.columns.length, tableType: table.type });
   const tbody = createElement('tbody');
@@ -1881,6 +1882,12 @@ function renderGrid({ appendFrom = null } = {}) {
   const visiblePinnedRowIndexes = new Map(
     visiblePinnedRows.map((rowIndex, pinnedIndex) => [rowIndex, pinnedIndex]),
   );
+  const gridWindow = getGridWindow({
+    rowCount: visibleRows.length,
+    scrollTop: elements.grid.scrollTop,
+    viewportHeight: elements.grid.clientHeight,
+    pinnedIndexes: new Set(visiblePinnedRows.map((rowIndex) => rowIndex - visibleRowOffset)),
+  });
 
   if (visibleRows.length === 0) {
     tbody.append(createElement('tr', {
@@ -1894,8 +1901,12 @@ function renderGrid({ appendFrom = null } = {}) {
     }));
   }
 
-  const firstRowIndex = isAppend ? appendFrom : 0;
-  for (let rowIndex = firstRowIndex; rowIndex < visibleRows.length; rowIndex += 1) {
+  const renderedRowIndexes = [...gridWindow.pinnedRowIndexes, ...gridWindow.rowIndexes];
+  for (let renderIndex = 0; renderIndex < renderedRowIndexes.length; renderIndex += 1) {
+    if (renderIndex === gridWindow.pinnedRowIndexes.length && gridWindow.topSpacerHeight > 0) {
+      tbody.append(createGridWindowSpacer({ columnCount, height: gridWindow.topSpacerHeight }));
+    }
+    const rowIndex = renderedRowIndexes[renderIndex];
     const row = visibleRows[rowIndex];
     const realRowIndex = visibleRowOffset + rowIndex;
     const isRowPinned = pinnedRows.has(realRowIndex);
@@ -1964,8 +1975,10 @@ function renderGrid({ appendFrom = null } = {}) {
       const isImage = isImageBlob(value);
       let imageURL = null;
       if (isImage) {
-        imageURL = blobToObjectURL(value);
-        gridBlobUrlsLocal.push(imageURL);
+        const blobUrlKey = value;
+        imageURL = gridBlobUrls.get(blobUrlKey) ?? blobToObjectURL(value);
+        gridBlobUrls.set(blobUrlKey, imageURL);
+        retainedBlobUrlKeys.add(blobUrlKey);
       }
       const cellChildren = isImage && imageURL
         ? [
@@ -2062,22 +2075,19 @@ function renderGrid({ appendFrom = null } = {}) {
 
     tbody.append(tr);
   }
+  if (gridWindow.bottomSpacerHeight > 0) {
+    tbody.append(createGridWindowSpacer({ columnCount, height: gridWindow.bottomSpacerHeight }));
+  }
 
-  tableElement.append(tbody);
-  if (isAppend) {
-    const renderedBody = elements.grid.querySelector('.data-grid tbody');
-    if (!renderedBody) {
-      for (const url of gridBlobUrlsLocal) {
-        URL.revokeObjectURL(url);
-      }
-      renderGrid();
-      return;
-    }
-    renderedBody.append(...tbody.children);
-    gridBlobUrls.push(...gridBlobUrlsLocal);
+  if (bodyOnly && tableElement.querySelector('tbody')) {
+    tableElement.querySelector('tbody').replaceWith(tbody);
   } else {
+    tableElement.append(tbody);
     elements.grid.replaceChildren(tableElement);
-    gridBlobUrls = gridBlobUrlsLocal;
+  }
+  for (const key of getEvictedGridResources(gridBlobUrls.keys(), retainedBlobUrlKeys)) {
+    URL.revokeObjectURL(gridBlobUrls.get(key));
+    gridBlobUrls.delete(key);
   }
   const renderedSelectAll = elements.grid.querySelector('[data-select-all-rows]');
   if (renderedSelectAll) {
@@ -2089,8 +2099,18 @@ function renderGrid({ appendFrom = null } = {}) {
   updateSelectionUi();
 }
 
-function appendGridRows(startIndex) {
-  renderGrid({ appendFrom: startIndex });
+function appendGridRows() {
+  renderGrid({ bodyOnly: true });
+}
+
+function scheduleGridWindowRender() {
+  if (gridWindowRenderFrame) {
+    return;
+  }
+  gridWindowRenderFrame = window.requestAnimationFrame(() => {
+    gridWindowRenderFrame = 0;
+    renderGrid({ bodyOnly: true });
+  });
 }
 
 function buildGridEmptyState(table) {
@@ -2472,7 +2492,7 @@ async function handleClick(event) {
       pinnedRows.add(realRowIndex);
     }
     selectGridRow(rowIndex);
-    renderGrid();
+    renderGrid({ bodyOnly: true });
     return;
   }
 

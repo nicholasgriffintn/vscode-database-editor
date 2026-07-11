@@ -33,8 +33,18 @@ export function createElement(tagName, options = {}) {
   return element;
 }
 
-function applyStyleDeclarations(element, styleText) {
-  for (const declaration of String(styleText).split(';')) {
+function applyStyleDeclarations(element, declarations) {
+  if (declarations && typeof declarations === 'object') {
+    for (const [property, value] of Object.entries(declarations)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+      element.style.setProperty(toCssProperty(property), String(value));
+    }
+    return;
+  }
+
+  for (const declaration of String(declarations).split(';')) {
     const separator = declaration.indexOf(':');
     if (separator === -1) {
       continue;
@@ -48,6 +58,12 @@ function applyStyleDeclarations(element, styleText) {
 
     element.style.setProperty(property, value);
   }
+}
+
+function toCssProperty(property) {
+  return property.startsWith('--')
+    ? property
+    : property.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
 }
 
 export function clear(element) {

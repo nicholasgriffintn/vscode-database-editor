@@ -48,3 +48,13 @@ test('createElement applies style declarations without setting a style attribute
   assert.equal(element.style.declarations.get('z-index'), '5');
   assert.equal(element.attributes.get('data-column'), 'id');
 });
+
+test('createElement applies object style declarations used by virtual grid geometry', () => {
+  const element = createElement('td', {
+    style: { height: '18240px', pointerEvents: 'none' },
+  });
+
+  assert.equal(element.attributes.has('style'), false);
+  assert.equal(element.style.declarations.get('height'), '18240px');
+  assert.equal(element.style.declarations.get('pointer-events'), 'none');
+});

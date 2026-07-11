@@ -419,6 +419,18 @@ button {
   vertical-align: top;
 }
 
+.data-grid .grid-window-spacer td {
+  height: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.data-grid tbody tr[data-row] {
+  /* The virtual window uses this invariant to preserve scroll geometry. */
+  height: 38px;
+}
+
 .data-grid th:not(.row-number-header),
 .data-grid td:not(.row-number-cell):not(.row-actions-cell) {
   max-width: var(--grid-column-max-width);
