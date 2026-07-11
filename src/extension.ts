@@ -15,6 +15,7 @@ import type {
 } from './custom-editor-protocol';
 import { readEditorSettings } from './editor-settings';
 import type { EditorSettings } from './editor-settings';
+import { createEmptySqliteBytes, createNewDatabase } from './new-database';
 import {
   SqlExportCancelledError,
   exportSqlDatabase,
@@ -77,6 +78,20 @@ export function activate(context: vscode.ExtensionContext): SqliteExtensionTestA
         retainContextWhenHidden: true,
       },
       supportsMultipleEditorsPerDocument: false,
+    }),
+    vscode.commands.registerCommand('databaseEditor.newDatabase', async () => {
+      try {
+        await createNewDatabase({
+          showSaveDialog: async (options) => vscode.window.showSaveDialog(options),
+          createDatabaseBytes: async () => createEmptySqliteBytes(await loadSqlJs(context.extensionUri)),
+          writeFile: async (destination, bytes) => vscode.workspace.fs.writeFile(destination, bytes),
+          openDatabase: async (destination) => {
+            await vscode.commands.executeCommand('vscode.openWith', destination, viewType);
+          },
+        });
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Could not create SQLite database: ${getErrorMessage(error)}`);
+      }
     }),
     vscode.commands.registerCommand('databaseEditor.openAsSqlite', async (uri?: vscode.Uri) => {
       const target = uri ?? vscode.window.activeTextEditor?.document.uri;

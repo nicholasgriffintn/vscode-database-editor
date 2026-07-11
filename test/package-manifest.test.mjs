@@ -4,6 +4,12 @@ import test from 'node:test';
 
 const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
+test('new database command is contributed and activates the extension', () => {
+  const command = manifest.contributes.commands.find((candidate) => candidate.command === 'databaseEditor.newDatabase');
+  assert.equal(command.title, 'New SQLite Database');
+  assert.ok(manifest.activationEvents.includes('onCommand:databaseEditor.newDatabase'));
+});
+
 test('Copilot language-model tools are hidden when the integration is disabled', () => {
   const tools = Object.fromEntries(
     manifest.contributes.languageModelTools.map((tool) => [tool.name, tool]),

@@ -23,11 +23,13 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 
 ## Usage
 
-1. Open a recognized SQLite database file (`.db`, `.db3`, `.sqlite`, `.sqlite3`, `.sdb`, `.s3db`, or `.gpkg`) in VS Code. For another extension, run **Open as SQLite Database** from the Command Palette or the Explorer context menu.
+1. Run **Database Editor: New SQLite Database** from the Command Palette, or open a recognized SQLite database file (`.db`, `.db3`, `.sqlite`, `.sqlite3`, `.sdb`, `.s3db`, or `.gpkg`). For another extension, run **Open as SQLite Database** from the Command Palette or the Explorer context menu.
 2. The custom editor launches automatically — browse tables in the sidebar.
 3. Click a table to view its data in the paged grid.
 4. Click once to select a cell, double-click to edit it, or use the row Actions column for row-level editing.
 5. Press `Ctrl+S` (`Cmd+S` on macOS) or click **Save** to persist changes unless `databaseEditor.instantCommit` is enabled.
+
+The new-database command uses VS Code's Save dialog, writes a valid empty SQLite file through the workspace filesystem, and opens it directly in the custom editor. This works for local files and writable virtual-workspace filesystem providers.
 
 ### How editing and saving work
 

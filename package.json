@@ -39,6 +39,7 @@
   "pricing": "Free",
   "activationEvents": [
     "onCustomEditor:databaseEditor.sqlite",
+    "onCommand:databaseEditor.newDatabase",
     "onCommand:databaseEditor.copilot.chatWithDatabase",
     "onChatParticipant:database-editor.sqlite-chat",
     "onLanguageModelTool:databaseEditor_list_open_databases",
@@ -262,6 +263,12 @@
       }
     ],
     "commands": [
+      {
+        "command": "databaseEditor.newDatabase",
+        "title": "New SQLite Database",
+        "category": "SQLite Database Editor",
+        "icon": "$(new-file)"
+      },
       {
         "command": "databaseEditor.openAsSqlite",
         "title": "Open as SQLite Database"
