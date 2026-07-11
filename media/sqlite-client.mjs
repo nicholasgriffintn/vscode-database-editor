@@ -1,4 +1,9 @@
-import { analyzeSqlScript, buildTableCount, quoteIdentifier } from './sql-utils.mjs';
+import {
+  analyzeSqlScript,
+  assertSqlScriptCanExport,
+  buildTableCount,
+  quoteIdentifier,
+} from './sql-utils.mjs';
 
 export function configureDatabase(db) {
   db.run('PRAGMA foreign_keys = ON');
@@ -129,13 +134,17 @@ export function runSqlScript(db, sql, analysis = analyzeSqlScript(sql)) {
     return { results: [], changed: false };
   }
 
+  assertSqlScriptCanExport(analysis);
+
   if (!analysis.mutates) {
     return { results: db.exec(sql), changed: false };
   }
 
   if (analysis.hasTransactionControl) {
     try {
-      return { results: db.exec(sql), changed: true };
+      const results = db.exec(sql);
+      assertSqlScriptCanExport(analysis);
+      return { results, changed: true };
     } catch (error) {
       rollbackBestEffort(db);
       markDatabaseChanged(error);

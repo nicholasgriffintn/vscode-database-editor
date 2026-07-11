@@ -70,6 +70,7 @@ import {
 } from './sqlite-client.mjs';
 import {
   analyzeSqlScript,
+  assertSqlScriptCanExport,
   buildRowCopyContent,
   buildSqlDump,
   buildDelete,
@@ -3436,6 +3437,7 @@ async function runSqlWorkspace() {
 
   try {
     const { results, changed } = runSqlScript(db, querySql, analysis);
+    assertSqlScriptCanExport(analysis);
     if (changed) {
       markChanged();
       await refreshTables();

@@ -175,6 +175,10 @@ test('analyzes read-only SQL scripts without mutating flags', () => {
     mutates: false,
     hasTransactionControl: false,
     isMultiStatement: false,
+    transactionControl: [],
+    leavesTransactionOpen: false,
+    hasUnmatchedTransactionClose: false,
+    openSavepointCount: 0,
   });
   assert.equal(analyzeSqlScript('/* inspect */ WITH visible AS (SELECT * FROM people) SELECT * FROM visible').isReadOnly, true);
   assert.equal(analyzeSqlScript('-- comment\nSELECT 1').isReadOnly, true);
@@ -198,7 +202,7 @@ test('analyzes mutating and transaction-controlled SQL scripts', () => {
   assert.equal(explicitTransaction.hasTransactionControl, true);
 });
 
-test.todo('reports transaction and savepoint balance for incomplete scripts', () => {
+test('reports transaction and savepoint balance for incomplete scripts', () => {
   const openTransaction = analyzeSqlScript('BEGIN; INSERT INTO notes VALUES (1);');
   assert.equal(openTransaction.leavesTransactionOpen, true);
   assert.equal(openTransaction.hasUnmatchedTransactionClose, false);
@@ -210,7 +214,7 @@ test.todo('reports transaction and savepoint balance for incomplete scripts', ()
   assert.deepEqual(nestedSavepoint.transactionControl, ['savepoint', 'savepoint', 'release']);
 });
 
-test.todo('reports unmatched transaction closes without treating complete scripts as open', () => {
+test('reports unmatched transaction closes without treating complete scripts as open', () => {
   const unmatched = analyzeSqlScript('COMMIT; SELECT 1;');
   assert.equal(unmatched.hasUnmatchedTransactionClose, true);
   assert.equal(unmatched.leavesTransactionOpen, false);
@@ -218,6 +222,14 @@ test.todo('reports unmatched transaction closes without treating complete script
   const complete = analyzeSqlScript('BEGIN; SAVEPOINT inner; RELEASE inner; COMMIT;');
   assert.equal(complete.hasUnmatchedTransactionClose, false);
   assert.equal(complete.leavesTransactionOpen, false);
+
+  const explicitStillOpen = analyzeSqlScript('BEGIN; SAVEPOINT inner; RELEASE inner;');
+  assert.equal(explicitStillOpen.hasUnmatchedTransactionClose, false);
+  assert.equal(explicitStillOpen.leavesTransactionOpen, true);
+
+  const rollbackTo = analyzeSqlScript('SAVEPOINT outer; SAVEPOINT inner; ROLLBACK TO outer; RELEASE outer;');
+  assert.equal(rollbackTo.hasUnmatchedTransactionClose, false);
+  assert.equal(rollbackTo.leavesTransactionOpen, false);
 });
 
 test('analyzes SQL scripts without splitting comments or quoted semicolons', () => {

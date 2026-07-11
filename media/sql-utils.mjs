@@ -120,7 +120,8 @@ export function parseCellInput(input, column, previousValue) {
 export function analyzeSqlScript(sql) {
   const statements = splitSqlStatements(stripSqlComments(String(sql ?? '')));
   const hasStatements = statements.length > 0;
-  const hasTransactionControl = statements.some(isTransactionControlStatement);
+  const transaction = analyzeTransactionControl(statements);
+  const hasTransactionControl = transaction.transactionControl.length > 0;
   const mutates = statements.some((statement) => !isReadOnlyStatement(statement));
 
   return {
@@ -131,7 +132,17 @@ export function analyzeSqlScript(sql) {
     mutates,
     hasTransactionControl,
     isMultiStatement: statements.length > 1,
+    ...transaction,
   };
+}
+
+export function assertSqlScriptCanExport(analysis) {
+  if (analysis.hasUnmatchedTransactionClose) {
+    throw new Error('SQL script contains an unmatched transaction close or savepoint release.');
+  }
+  if (analysis.leavesTransactionOpen) {
+    throw new Error('SQL script leaves a transaction or savepoint open; you must include COMMIT, ROLLBACK, or matching RELEASE before the script ends.');
+  }
 }
 
 export function isReadOnlyQuery(sql) {
@@ -436,6 +447,116 @@ function isReadOnlyStatement(statement) {
     return isReadOnlyPragma(statement);
   }
   return false;
+}
+
+function analyzeTransactionControl(statements) {
+  let transactionOpen = false;
+  let explicitTransaction = false;
+  let hasUnmatchedTransactionClose = false;
+  let savepoints = [];
+  const transactionControl = [];
+
+  for (const statement of statements) {
+    const trimmed = statement.trim();
+    if (!isTransactionControlStatement(trimmed)) {
+      continue;
+    }
+
+    const keyword = getLeadingKeyword(trimmed);
+    transactionControl.push(keyword === 'end' ? 'commit' : keyword);
+
+    if (keyword === 'begin') {
+      if (transactionOpen) {
+        hasUnmatchedTransactionClose = true;
+      }
+      transactionOpen = true;
+      explicitTransaction = true;
+      continue;
+    }
+
+    if (keyword === 'savepoint') {
+      transactionOpen = true;
+      savepoints.push(readTransactionName(trimmed, /^savepoint\s+/i));
+      continue;
+    }
+
+    if (keyword === 'release') {
+      const name = readTransactionName(trimmed, /^release(?:\s+savepoint)?\s+/i);
+      const index = findSavepointIndex(savepoints, name);
+      if (index === -1) {
+        hasUnmatchedTransactionClose = true;
+      } else {
+        savepoints = savepoints.slice(0, index);
+        if (savepoints.length === 0 && !explicitTransaction) {
+          transactionOpen = false;
+        }
+      }
+      continue;
+    }
+
+    if (keyword === 'rollback') {
+      const rollbackTo = trimmed.match(/^rollback(?:\s+transaction)?\s+to(?:\s+savepoint)?\s+(.+)$/i);
+      if (rollbackTo) {
+        const name = normalizeTransactionName(rollbackTo[1]);
+        const index = findSavepointIndex(savepoints, name);
+        if (index === -1) {
+          hasUnmatchedTransactionClose = true;
+        } else {
+          savepoints = savepoints.slice(0, index + 1);
+        }
+      } else {
+        if (!transactionOpen) {
+          hasUnmatchedTransactionClose = true;
+        }
+        transactionOpen = false;
+        explicitTransaction = false;
+        savepoints = [];
+      }
+      continue;
+    }
+
+    if (keyword === 'commit' || keyword === 'end') {
+      if (!transactionOpen) {
+        hasUnmatchedTransactionClose = true;
+      }
+      transactionOpen = false;
+      explicitTransaction = false;
+      savepoints = [];
+    }
+  }
+
+  return {
+    transactionControl,
+    leavesTransactionOpen: transactionOpen,
+    hasUnmatchedTransactionClose,
+    openSavepointCount: savepoints.length,
+  };
+}
+
+function readTransactionName(statement, prefix) {
+  return normalizeTransactionName(statement.replace(prefix, ''));
+}
+
+function normalizeTransactionName(value) {
+  const token = String(value ?? '').trim().match(/^(?:"(?:[^"]|"")*"|'(?:[^']|'')*'|`(?:[^`]|``)*`|\[[^\]]*\]|[^\s]+)/)?.[0] ?? '';
+  if (token.startsWith('[') && token.endsWith(']')) {
+    return token.slice(1, -1).toLowerCase();
+  }
+  if ((token.startsWith('"') && token.endsWith('"'))
+    || (token.startsWith("'") && token.endsWith("'"))
+    || (token.startsWith('`') && token.endsWith('`'))) {
+    return token.slice(1, -1).replaceAll(token[0] + token[0], token[0]).toLowerCase();
+  }
+  return token.toLowerCase();
+}
+
+function findSavepointIndex(savepoints, name) {
+  for (let index = savepoints.length - 1; index >= 0; index -= 1) {
+    if (savepoints[index] === name) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function isTransactionControlStatement(statement) {

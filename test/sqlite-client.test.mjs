@@ -305,7 +305,7 @@ test('does not wrap scripts that provide explicit transaction control', async ()
   db.close();
 });
 
-test.todo('rejects explicit SQL scripts that leave a transaction open', async () => {
+test('rejects explicit SQL scripts that leave a transaction open', async () => {
   const db = await createPeopleDatabase();
   const sql = "BEGIN; INSERT INTO people (name) VALUES ('Grace');";
 
@@ -317,7 +317,7 @@ test.todo('rejects explicit SQL scripts that leave a transaction open', async ()
   db.close();
 });
 
-test.todo('rejects explicit SQL scripts that leave nested savepoints open', async () => {
+test('rejects explicit SQL scripts that leave nested savepoints open', async () => {
   const db = await createPeopleDatabase();
   const sql = "SAVEPOINT outer; SAVEPOINT inner; INSERT INTO people (name) VALUES ('Grace'); RELEASE inner;";
 
@@ -325,6 +325,31 @@ test.todo('rejects explicit SQL scripts that leave nested savepoints open', asyn
     () => runSqlScript(db, sql, analyzeSqlScript(sql)),
     /matching RELEASE/i,
   );
+  db.close();
+});
+
+test('rejects unmatched transaction closes before executing the script', async () => {
+  const db = await createPeopleDatabase();
+  const sql = "COMMIT; INSERT INTO people (name) VALUES ('Grace');";
+
+  assert.throws(
+    () => runSqlScript(db, sql, analyzeSqlScript(sql)),
+    /unmatched transaction close/i,
+  );
+  assert.deepEqual(rows(db, 'SELECT name FROM people ORDER BY id'), [['Ada']]);
+  db.close();
+});
+
+test('complete explicit rollback and savepoint scripts leave no pending changes', async () => {
+  const db = await createPeopleDatabase();
+  const rollbackSql = "BEGIN; INSERT INTO people (name) VALUES ('Grace'); ROLLBACK;";
+  const savepointSql = "SAVEPOINT outer; INSERT INTO people (name) VALUES ('Katherine'); SAVEPOINT inner; RELEASE inner; RELEASE outer;";
+
+  runSqlScript(db, rollbackSql, analyzeSqlScript(rollbackSql));
+  assert.deepEqual(rows(db, 'SELECT name FROM people ORDER BY id'), [['Ada']]);
+
+  runSqlScript(db, savepointSql, analyzeSqlScript(savepointSql));
+  assert.deepEqual(rows(db, 'SELECT name FROM people ORDER BY id'), [['Ada'], ['Katherine']]);
   db.close();
 });
 
