@@ -79,12 +79,20 @@ export function getDatabaseContext(
   db: SqlJsDatabase,
   input: DbContextInput,
 ): unknown {
-  const objects = getSchemaObjects(db, input.objectName);
-  const databaseUri = input.databaseUri ?? document.uri.toString();
-  const database = {
-    uri: databaseUri,
-    name: basenameFromUri(document.uri.toString()),
+  return {
+    database: {
+      uri: input.databaseUri ?? document.uri.toString(),
+      name: basenameFromUri(document.uri.toString()),
+    },
+    ...getDatabaseMetadataContext(db, input),
   };
+}
+
+export function getDatabaseMetadataContext(
+  db: SqlJsDatabase,
+  input: Omit<DbContextInput, 'databaseUri'>,
+): Record<string, unknown> {
+  const objects = getSchemaObjects(db, input.objectName);
 
   if (!input.objectName) {
     const offset = Math.max(0, Math.floor(input.offset ?? 0));
@@ -92,7 +100,6 @@ export function getDatabaseContext(
     const page = objects.slice(offset, offset + limit).map(({ name, type }) => ({ name, type }));
     const nextOffset = offset + page.length;
     return {
-      database,
       totalObjects: objects.length,
       offset,
       limit,
@@ -103,7 +110,6 @@ export function getDatabaseContext(
   }
 
   return {
-    database,
     totalObjects: objects.length,
     truncated: false,
     objects: objects.map((object) => ({

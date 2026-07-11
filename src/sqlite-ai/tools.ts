@@ -2,22 +2,19 @@ import type * as vscode from 'vscode';
 
 import { getErrorMessage } from '../utilities/errors';
 import { escapeMarkdown, formatSqlCodeBlock } from '../utilities/markdown';
+import { basenameFromUri } from '../utilities/path';
+import { configureDatabase } from './sqljs-host';
 import type { SqlJsDatabase, SqlJsStatic } from './sqljs-host';
+import { createSqlWorkerClient } from './sql-worker-client';
+import type { SqlWorkerClient } from './sql-worker-client';
 import type { OpenDatabaseSummary, SqliteSelectionContext } from './sqlite-document-registry';
-import { capRows, isAllowedModification, isReadOnlyQuery, quoteIdentifier } from './sql-safety';
-import { compileSensitivePatterns, getColumns, inferRedactedOutputColumns, throwIfCancelled } from './tools/query-redaction';
+import { isAllowedModification, isReadOnlyQuery } from './sql-safety';
+import { throwIfCancelled } from './tools/query-redaction';
 import {
   DbContextInput,
   describeDatabaseTarget,
-  getDatabaseContext,
   sanitizeSelectionContext,
 } from './tools/database-context';
-import {
-  executeRows,
-  getColumnsInfo,
-  getRowCount,
-  getSchemaObjects,
-} from './tools/schema-helpers';
 
 export type SqliteToolDocument = {
   readonly uri: { toString(): string };
@@ -58,6 +55,7 @@ type CreateSqliteToolsOptions<TDocument extends SqliteToolDocument> = {
     timeoutMs: number;
     sensitiveColumnPatterns: string[];
   };
+  sqlWorkerClient?: SqlWorkerClient;
 };
 
 type QueryInput = {
@@ -96,17 +94,10 @@ export const SQLITE_TOOL_NAMES = [
 
 const QUERY_ROW_LIMIT = 200;
 
-export function configureDatabase(db: SqlJsDatabase): void {
-  db.run('PRAGMA foreign_keys = ON');
-  const value = db.exec('PRAGMA foreign_keys')[0]?.values?.[0]?.[0];
-  if (Number(value) !== 1) {
-    throw new Error('Could not enable SQLite foreign key enforcement for this database session.');
-  }
-}
-
 export function createSqliteTools<TDocument extends SqliteToolDocument>(
   options: CreateSqliteToolsOptions<TDocument>,
 ): SqliteTools {
+  const sqlWorker = options.sqlWorkerClient ?? createSqlWorkerClient({ extensionPath: options.extensionUri.fsPath });
   const result = (value: unknown) => new options.vscode.LanguageModelToolResult([
     new options.vscode.LanguageModelTextPart(JSON.stringify(value)),
   ]);
@@ -124,21 +115,12 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
     close(): void;
     error?: vscode.LanguageModelToolResult;
   }> {
-    if (!input.databaseUri && options.registry.listOpenDatabases().length > 1) {
-      return {
-        close: () => {},
-        error: error('Multiple SQLite databases are open. Call databaseEditor_list_open_databases and provide databaseUri explicitly.'),
-      };
+    const resolved = resolveDocument(input);
+    if (resolved.error || !resolved.document) {
+      return { close: () => {}, error: resolved.error };
     }
 
-    const document = options.registry.resolveDocument(input.databaseUri);
-    if (!document) {
-      return {
-        close: () => {},
-        error: error('Open a SQLite database with SQLite Database Editor first.'),
-      };
-    }
-
+    const document = resolved.document;
     const SQL = await options.loadSqlJs(options.extensionUri);
     const snapshot = document.getSnapshot();
     const db = new SQL.Database(snapshot.data);
@@ -151,6 +133,25 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
     };
   }
 
+  function resolveDocument(input: { databaseUri?: string }): {
+    document?: TDocument;
+    error?: vscode.LanguageModelToolResult;
+  } {
+    if (!input.databaseUri && options.registry.listOpenDatabases().length > 1) {
+      return {
+        error: error('Multiple SQLite databases are open. Call databaseEditor_list_open_databases and provide databaseUri explicitly.'),
+      };
+    }
+
+    const document = options.registry.resolveDocument(input.databaseUri);
+    if (!document) {
+      return {
+        error: error('Open a SQLite database with SQLite Database Editor first.'),
+      };
+    }
+    return { document };
+  }
+
   return {
     listOpenDatabases: {
       invoke: () => disabledError() ?? result({
@@ -160,31 +161,42 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
       prepareInvocation: () => ({ invocationMessage: 'Listing open SQLite databases' }),
     },
     dbContext: {
-      invoke: async ({ input }) => {
+      invoke: async ({ input }, token) => {
         const disabled = disabledError();
         if (disabled) {
           return disabled;
         }
-        const opened = await openDatabase(input ?? {});
-        if (opened.error || !opened.document || !opened.db) {
-          return opened.error;
+        const resolved = resolveDocument(input ?? {});
+        if (resolved.error || !resolved.document) {
+          return resolved.error;
         }
 
         try {
-          const selection = sanitizeSelectionContext(options.registry.getSelectionContext(opened.document.uri.toString()));
+          const selection = sanitizeSelectionContext(options.registry.getSelectionContext(resolved.document.uri.toString()));
           const contextInput = {
             ...(input ?? {}),
             databaseUri: input?.databaseUri ?? selection?.databaseUri,
             objectName: input?.objectName ?? selection?.objectName,
           };
+          const timeoutMs = Math.max(100, options.getQueryOptions().timeoutMs);
+          const snapshot = resolved.document.getSnapshot();
+          const metadata = await sqlWorker.run({
+            operation: 'context',
+            database: snapshot.data,
+            objectName: contextInput.objectName,
+            offset: contextInput.offset,
+            limit: contextInput.limit,
+          }, { timeoutMs, cancellationToken: token });
           return result({
-            ...getDatabaseContext(opened.document, opened.db, contextInput) as object,
+            database: {
+              uri: contextInput.databaseUri ?? resolved.document.uri.toString(),
+              name: basenameFromUri(resolved.document.uri.toString()),
+            },
+            ...metadata,
             selection,
           });
         } catch (caught) {
           return error(getErrorMessage(caught));
-        } finally {
-          opened.close();
         }
       },
       prepareInvocation: () => ({ invocationMessage: 'Reading SQLite schema context' }),
@@ -199,30 +211,29 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
           return error('Only one read-only SELECT or safe WITH query is allowed.');
         }
 
-        const opened = await openDatabase(input);
-        if (opened.error || !opened.db) {
-          return opened.error;
+        const resolved = resolveDocument(input);
+        if (resolved.error || !resolved.document) {
+          return resolved.error;
         }
 
         try {
           const queryOptions = options.getQueryOptions();
           const rowLimit = Math.max(1, Math.min(500, Math.floor(queryOptions.maxResultRows || QUERY_ROW_LIMIT)));
           const timeoutMs = Math.max(100, Math.min(30_000, Math.floor(queryOptions.timeoutMs || 5_000)));
-          const sensitivePatterns = compileSensitivePatterns(queryOptions.sensitiveColumnPatterns);
-          const rows = executeRows(opened.db, input.query, rowLimit + 1, token, Date.now() + timeoutMs);
-          const columns = rows.length > 0 ? Object.keys(rows[0]) : getColumns(opened.db, input.query);
-          const redactedOutputColumns = inferRedactedOutputColumns(input.query, columns, sensitivePatterns, opened.db);
-          const capped = capRows(rows, rowLimit, sensitivePatterns, redactedOutputColumns);
+          const snapshot = resolved.document.getSnapshot();
+          const workerResult = await sqlWorker.run({
+              operation: 'query',
+              database: snapshot.data,
+              query: input.query,
+              rowLimit,
+              sensitiveColumnPatterns: queryOptions.sensitiveColumnPatterns,
+            }, { timeoutMs, cancellationToken: token });
           return result({
             queryName: input.queryName,
-            columns,
-            ...capped,
-            rowCount: capped.rows.length,
+            ...workerResult,
           });
         } catch (caught) {
           return error(getErrorMessage(caught));
-        } finally {
-          opened.close();
         }
       },
       prepareInvocation: ({ input }) => ({
@@ -236,18 +247,21 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
         if (!input?.query || !isReadOnlyQuery(input.query)) {
           return error('Only one read-only SELECT or safe WITH query can be explained.');
         }
-        const opened = await openDatabase(input);
-        if (opened.error || !opened.db) return opened.error;
+        const resolved = resolveDocument(input);
+        if (resolved.error || !resolved.document) return resolved.error;
         try {
           const timeoutMs = Math.max(100, options.getQueryOptions().timeoutMs);
+          const snapshot = resolved.document.getSnapshot();
+          const workerResult = await sqlWorker.run(
+            { operation: 'explain', database: snapshot.data, query: input.query },
+            { timeoutMs, cancellationToken: token },
+          );
           return result({
             queryName: input.queryName,
-            plan: executeRows(opened.db, `EXPLAIN QUERY PLAN ${input.query}`, undefined, token, Date.now() + timeoutMs),
+            ...workerResult,
           });
         } catch (caught) {
           return error(getErrorMessage(caught));
-        } finally {
-          opened.close();
         }
       },
       prepareInvocation: ({ input }) => ({ invocationMessage: `Explaining SQLite query '${input.queryName}'` }),
@@ -257,31 +271,18 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
         const disabled = disabledError();
         if (disabled) return disabled;
         if (!input?.objectName) return error('objectName is required.');
-        const opened = await openDatabase(input);
-        if (opened.error || !opened.db) return opened.error;
+        const resolved = resolveDocument(input);
+        if (resolved.error || !resolved.document) return resolved.error;
         try {
-          if (!getSchemaObjects(opened.db, input.objectName)[0]) {
-            return error(`SQLite object '${input.objectName}' was not found.`);
-          }
-          const deadline = Date.now() + Math.max(100, options.getQueryOptions().timeoutMs);
-          const rowCount = getRowCount(opened.db, input.objectName, token, deadline);
-          const columns = getColumnsInfo(opened.db, input.objectName).map((column) => {
-            const name = String((column as { name: unknown }).name);
-            const quoted = quoteIdentifier(name);
-            const stats = executeRows(
-              opened.db!,
-              `SELECT COUNT(*) - COUNT(${quoted}) AS nullCount, COUNT(DISTINCT ${quoted}) AS distinctCount FROM ${quoteIdentifier(input.objectName)}`,
-              1,
-              token,
-              deadline,
-            )[0] ?? {};
-            return { name, nullCount: Number(stats.nullCount ?? 0), distinctCount: Number(stats.distinctCount ?? 0) };
-          });
-          return result({ databaseUri: opened.document?.uri.toString(), objectName: input.objectName, rowCount, columns });
+          const timeoutMs = Math.max(100, options.getQueryOptions().timeoutMs);
+          const snapshot = resolved.document.getSnapshot();
+          const workerResult = await sqlWorker.run(
+            { operation: 'profile', database: snapshot.data, objectName: input.objectName },
+            { timeoutMs, cancellationToken: token },
+          );
+          return result({ databaseUri: input.databaseUri, ...workerResult });
         } catch (caught) {
           return error(getErrorMessage(caught));
-        } finally {
-          opened.close();
         }
       },
       prepareInvocation: ({ input }) => ({ invocationMessage: `Profiling SQLite object '${input.objectName}'` }),

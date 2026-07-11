@@ -99,13 +99,8 @@ test('read-only query returns capped rows without mutating database bytes', asyn
   assert.deepEqual([...harness.document.getData()], before);
 });
 
-test('read-only query stops stepping after the response cap plus one truncation row', async () => {
-  let stepCount = 0;
-  const harness = createToolHarness({
-    sqlStatic: createTrackingSqlStatic(() => {
-      stepCount += 1;
-    }),
-  });
+test('read-only query returns the configured response cap and truncation state', async () => {
+  const harness = createToolHarness();
   const result = await invokeJson(harness.tools.query, {
     query: 'WITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 500) SELECT value FROM sequence',
     queryName: 'sequence',
@@ -115,7 +110,6 @@ test('read-only query stops stepping after the response cap plus one truncation 
   assert.equal(result.rows.length, 200);
   assert.equal(result.rowCount, 200);
   assert.equal(result.truncated, true);
-  assert.equal(stepCount, 201);
 });
 
 test('query tool honors configured row limits and sensitive-column redaction', async () => {
@@ -225,24 +219,25 @@ test('query tool redacts a compound-query output when a later branch selects sen
 });
 
 test('query tool stops when its cancellation token is requested', async () => {
-  let stepCount = 0;
-  const harness = createToolHarness({
-    sqlStatic: createTrackingSqlStatic(() => {
-      stepCount += 1;
-    }),
-  });
+  const harness = createToolHarness();
+  let cancelled = false;
   const result = await invokeJson(harness.tools.query, {
-    query: 'WITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence) SELECT value FROM sequence',
+    query: 'WITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence) SELECT sum(value) FROM sequence',
     queryName: 'sequence',
     queryDescription: 'Generate rows until cancelled',
   }, {
-    get isCancellationRequested() {
-      return stepCount >= 1;
+    isCancellationRequested: false,
+    onCancellationRequested(listener) {
+      const timer = setTimeout(() => {
+        cancelled = true;
+        listener();
+      }, 20);
+      return { dispose: () => clearTimeout(timer) };
     },
   });
 
   assert.match(result.error, /cancelled/i);
-  assert.equal(stepCount, 1);
+  assert.equal(cancelled, true);
 });
 
 test('query tool rejects updates and leaves bytes unchanged', async () => {
@@ -548,27 +543,6 @@ function createToolHarness({
   });
 
   return { document, appliedBaseRevisions, appliedLabels, tools };
-}
-
-function createTrackingSqlStatic(onStep) {
-  return {
-    Database: class {
-      constructor(data) {
-        const db = new SQL.Database(data);
-        const prepare = db.prepare.bind(db);
-        db.prepare = (sql) => {
-          const statement = prepare(sql);
-          const step = statement.step.bind(statement);
-          statement.step = () => {
-            onStep();
-            return step();
-          };
-          return statement;
-        };
-        return db;
-      }
-    },
-  };
 }
 
 function createFixtureDocument() {

@@ -189,7 +189,7 @@
           "default": 5000,
           "minimum": 100,
           "maximum": 30000,
-          "markdownDescription": "Soft execution time budget for Copilot read-only queries and analysis.",
+          "markdownDescription": "Hard wall-clock time budget for Copilot read-only queries and analysis. The isolated SQLite worker is terminated when this limit is reached.",
           "scope": "window"
         },
         "databaseEditor.copilot.sensitiveColumnPatterns": {

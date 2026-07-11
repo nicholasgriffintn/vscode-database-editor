@@ -24,19 +24,38 @@ export type SqlJsStatement = {
 
 let sqlPromise: Promise<SqlJsStatic> | undefined;
 
-export function loadSqlJs(extensionUri: vscode.Uri): Promise<SqlJsStatic> {
+export async function loadSqlJs(extensionUri: vscode.Uri): Promise<SqlJsStatic> {
   const cached = sqlPromise;
   if (cached) {
-    return cached;
+    return await cached;
   }
 
-  const sqlJsPath = path.join(extensionUri.fsPath, 'media', 'vendor', 'sqljs', 'sql-wasm.js');
-  const wasmDirectory = path.join(extensionUri.fsPath, 'media', 'vendor', 'sqljs');
+  const loading = initializeSqlJs(extensionUri.fsPath);
+  sqlPromise = loading;
+  try {
+    return await loading;
+  } catch (error) {
+    if (sqlPromise === loading) {
+      sqlPromise = undefined;
+    }
+    throw error;
+  }
+}
+
+export function initializeSqlJs(extensionPath: string): Promise<SqlJsStatic> {
+  const sqlJsPath = path.join(extensionPath, 'media', 'vendor', 'sqljs', 'sql-wasm.js');
+  const wasmDirectory = path.dirname(sqlJsPath);
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const initSqlJs = require(sqlJsPath);
-  const loading = initSqlJs({
+  return initSqlJs({
     locateFile: (file: string) => path.join(wasmDirectory, file),
   }) as Promise<SqlJsStatic>;
-  sqlPromise = loading;
-  return loading;
+}
+
+export function configureDatabase(db: SqlJsDatabase): void {
+  db.run('PRAGMA foreign_keys = ON');
+  const value = db.exec('PRAGMA foreign_keys')[0]?.values?.[0]?.[0];
+  if (Number(value) !== 1) {
+    throw new Error('Could not enable SQLite foreign key enforcement for this database session.');
+  }
 }
