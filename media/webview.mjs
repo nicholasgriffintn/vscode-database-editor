@@ -143,8 +143,14 @@ let schemaObjects = [];
 let activeSchemaView = 'graph';
 let isDirty = false;
 let isSaving = false;
+let currentRevision = 0;
+let databaseLoadQueue = Promise.resolve();
+let saveRequestCounter = 0;
+let pendingSaveRequestIds = new Set();
+let shouldSaveAfterCompletion = false;
 let pinnedColumns = new Set();
 let columnWidths = {};
+
 let pinnedRows = new Set();
 /** @type {string[]} */
 let gridBlobUrls = [];
@@ -216,10 +222,13 @@ window.addEventListener('message', async (event) => {
   const message = event.data;
   if (message.type === 'loadDatabase') {
     applyEditorSettings(message.settings, { resetPageSize: message.resetViewState !== false });
-    await openDatabase(message.name, message.data, {
+    const load = () => openDatabase(message.name, message.data, {
       dirty: message.dirty,
+      revision: message.revision,
       resetViewState: message.resetViewState,
     });
+    databaseLoadQueue = databaseLoadQueue.then(load, load);
+    await databaseLoadQueue;
   } else if (message.type === 'loadError') {
     handleLoadError(message.message, message.settings);
   } else if (message.type === 'settingsChanged') {
@@ -231,10 +240,11 @@ window.addEventListener('message', async (event) => {
       await refreshRows();
     }
   } else if (message.type === 'databaseSaved') {
-    handleDatabaseSaved(message.dirty);
+    handleDatabaseSaved(message.dirty, message.revision, message.requestId);
   } else if (message.type === 'databaseSaveFailed') {
-    handleDatabaseSaveFailed(message.message);
+    handleDatabaseSaveFailed(message.message, message.requestId);
   } else if (message.type === 'documentStateChanged') {
+    currentRevision = Math.max(currentRevision, Number(message.revision) || 0);
     isDirty = Boolean(message.dirty);
     updateSaveUi();
   } else if (message.type === 'clipboardText') {
@@ -888,7 +898,7 @@ async function handleInput(event) {
   }
 }
 
-async function openDatabase(name, data, { dirty = false, resetViewState = true } = {}) {
+async function openDatabase(name, data, { dirty = false, revision = 0, resetViewState = true } = {}) {
   try {
     elements.status.textContent = 'Opening database...';
     SQL ??= await initSqlJs({ locateFile: () => wasmUri });
@@ -918,7 +928,10 @@ async function openDatabase(name, data, { dirty = false, resetViewState = true }
       sortDirection = 'asc';
     }
     isDirty = Boolean(dirty);
+    currentRevision = Number.isInteger(revision) ? revision : 0;
     isSaving = false;
+    pendingSaveRequestIds.clear();
+    shouldSaveAfterCompletion = false;
     await refreshTables();
     updateSaveUi();
   } catch (error) {
@@ -1000,13 +1013,28 @@ function maybeAutoCommit() {
   }
 }
 
-function handleDatabaseSaved(dirty = false) {
-  isDirty = Boolean(dirty);
+function handleDatabaseSaved(dirty = false, revision = currentRevision, requestId = '') {
+  if (requestId.startsWith('ui-save-') && !pendingSaveRequestIds.has(requestId)) {
+    return;
+  }
+  pendingSaveRequestIds.delete(requestId);
+  const acknowledgedRevision = Number(revision);
+  isDirty = Boolean(dirty) || acknowledgedRevision !== currentRevision;
   isSaving = false;
+  const shouldRetry = shouldSaveAfterCompletion && isDirty;
+  shouldSaveAfterCompletion = false;
   updateSaveUi();
+  if (shouldRetry) {
+    window.setTimeout(() => requestSave(), 0);
+  }
 }
 
-function handleDatabaseSaveFailed(message) {
+function handleDatabaseSaveFailed(message, requestId = '') {
+  if (requestId.startsWith('ui-save-') && !pendingSaveRequestIds.has(requestId)) {
+    return;
+  }
+  pendingSaveRequestIds.delete(requestId);
+  shouldSaveAfterCompletion = false;
   isDirty = true;
   isSaving = false;
   updateSaveUi();
@@ -1014,13 +1042,24 @@ function handleDatabaseSaveFailed(message) {
 }
 
 function requestSave() {
-  if (!db || !isDirty || isSaving) {
+  if (!db || !isDirty) {
+    return;
+  }
+  if (isSaving) {
+    shouldSaveAfterCompletion = true;
     return;
   }
 
   isSaving = true;
+  shouldSaveAfterCompletion = false;
+  const requestId = `ui-save-${++saveRequestCounter}`;
+  pendingSaveRequestIds.add(requestId);
   updateSaveUi();
-  vscode.postMessage({ type: 'requestSave' });
+  vscode.postMessage({
+    type: 'requestSave',
+    requestId,
+    revision: currentRevision,
+  });
 }
 
 function updateSaveUi() {
@@ -3747,11 +3786,14 @@ function getEditableTable() {
 
 function markChanged() {
   const exported = db.export();
+  const baseRevision = currentRevision;
+  currentRevision += 1;
   isDirty = true;
   updateSaveUi();
   vscode.postMessage({
     type: 'databaseChanged',
     label: 'Edit SQLite database',
+    baseRevision,
     data: exported.buffer.slice(exported.byteOffset, exported.byteOffset + exported.byteLength),
   });
   maybeAutoCommit();

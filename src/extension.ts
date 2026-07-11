@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 import { applySnapshotDocumentChange } from './custom-document-history';
-import type { SnapshotChangeEvent } from './custom-document-history';
+import type { SnapshotApplyResult, SnapshotChangeEvent } from './custom-document-history';
 import {
   createDatabaseSaveFailedMessage,
   createDatabaseSavedMessage,
@@ -103,6 +103,7 @@ export function deactivate(): void {
 class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument> {
   private readonly changeEmitter = new vscode.EventEmitter<SnapshotChangeEvent<SqliteDocument>>();
   private readonly registry = new SqliteDocumentRegistry<SqliteDocument>();
+  private saveRequestCounter = 0;
 
   readonly onDidChangeCustomDocument = this.changeEmitter.event;
 
@@ -145,17 +146,29 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
         case 'ready':
           await this.postDocument(webviewPanel, document);
           break;
-        case 'databaseChanged':
-          await this.applyDatabaseChange(document, new Uint8Array(message.data), message.label);
+        case 'databaseChanged': {
+          const result = await this.applyDatabaseChange(
+            document,
+            new Uint8Array(message.data),
+            message.label,
+            false,
+            message.baseRevision,
+          );
+          if (!result.accepted) {
+            await this.postDocument(webviewPanel, document, false);
+          } else {
+            await this.postDocumentToSiblingPanels(document, webviewPanel);
+          }
           break;
+        }
         case 'copilotSelectionChanged':
           this.registry.updateSelectionContext(document, message.context);
           break;
         case 'requestSave':
           try {
-            await vscode.commands.executeCommand('workbench.action.files.save');
+            await this.saveCustomDocument(document, undefined, { requestId: message.requestId });
           } catch (error) {
-            const failure = createDatabaseSaveFailedMessage(error);
+            const failure = createDatabaseSaveFailedMessage(error, document.getRevision(), message.requestId);
             await webview.postMessage(failure);
             await vscode.window.showErrorMessage(failure.message);
           }
@@ -189,42 +202,66 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     });
   }
 
-  async saveCustomDocument(document: SqliteDocument, cancellation?: vscode.CancellationToken): Promise<void> {
+  async saveCustomDocument(
+    document: SqliteDocument,
+    cancellation?: vscode.CancellationToken,
+    options: { requestId?: string } = {},
+  ): Promise<void> {
     if (cancellation?.isCancellationRequested) {
       throw new vscode.CancellationError();
     }
-    const savedData = document.getData();
-    await vscode.workspace.fs.writeFile(document.uri, savedData);
-    document.markSaved(savedData);
-    await this.postToDocumentPanels(document, createDatabaseSavedMessage({
-      dirty: document.isDirty(),
-    }));
+    const requestId = options.requestId ?? this.createSaveRequestId('save');
+    const snapshot = document.getSnapshot();
+    await vscode.workspace.fs.writeFile(document.uri, snapshot.data);
+    await document.enqueueMutation(async () => {
+      document.markSaved(snapshot.data);
+      await this.postToDocumentPanels(document, createDatabaseSavedMessage({
+        dirty: document.isDirty(),
+        savedRevision: snapshot.revision,
+        currentRevision: document.getRevision(),
+        requestId,
+      }));
+    });
   }
 
   async saveCustomDocumentAs(
     document: SqliteDocument,
     destination: vscode.Uri,
     cancellation?: vscode.CancellationToken,
+    options: { requestId?: string } = {},
   ): Promise<void> {
     if (cancellation?.isCancellationRequested) {
       throw new vscode.CancellationError();
     }
-    const savedData = document.getData();
-    await vscode.workspace.fs.writeFile(destination, savedData);
-    document.markSaved(savedData);
-    await this.postToDocumentPanels(document, createDatabaseSavedMessage({
-      dirty: document.isDirty(),
-    }));
+    const requestId = options.requestId ?? this.createSaveRequestId('saveAs');
+    const snapshot = document.getSnapshot();
+    await vscode.workspace.fs.writeFile(destination, snapshot.data);
+    await document.enqueueMutation(async () => {
+      document.markSaved(snapshot.data);
+      await this.postToDocumentPanels(document, createDatabaseSavedMessage({
+        dirty: document.isDirty(),
+        savedRevision: snapshot.revision,
+        currentRevision: document.getRevision(),
+        requestId,
+      }));
+    });
+  }
+
+
+  private createSaveRequestId(kind: string): string {
+    this.saveRequestCounter += 1;
+    return `${kind}-${this.saveRequestCounter}`;
   }
 
   async revertCustomDocument(document: SqliteDocument): Promise<void> {
-    await document.reload();
+    await document.enqueueMutation(() => document.reload());
     await this.postToDocumentPanels(document, {
       type: 'loadDatabase',
       name: vscode.workspace.asRelativePath(document.uri),
       data: toArrayBuffer(document.getData()),
       settings: this.getEditorSettings(document.uri),
       dirty: false,
+      revision: document.getRevision(),
       resetViewState: false,
     });
   }
@@ -233,7 +270,8 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     document: SqliteDocument,
     context: vscode.CustomDocumentBackupContext,
   ): Promise<vscode.CustomDocumentBackup> {
-    await vscode.workspace.fs.writeFile(context.destination, document.getData());
+    const snapshot = document.getSnapshot();
+    await vscode.workspace.fs.writeFile(context.destination, snapshot.data);
     return {
       id: context.destination.toString(),
       delete: async () => {
@@ -262,11 +300,23 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     return this.registry.getSelectionContext(uri);
   }
 
-  async applyCopilotDatabaseChange(document: SqliteDocument, data: Uint8Array, label: string): Promise<void> {
-    await this.applyDatabaseChange(document, data, label, true);
+  async applyCopilotDatabaseChange(
+    document: SqliteDocument,
+    data: Uint8Array,
+    label: string,
+    baseRevision: number,
+  ): Promise<void> {
+    const result = await this.applyDatabaseChange(document, data, label, true, baseRevision);
+    if (!result.accepted) {
+      throw new Error('The database changed while Copilot was working. Rerun the tool against the latest revision.');
+    }
   }
 
-  private async postDocument(panel: vscode.WebviewPanel, document: SqliteDocument): Promise<void> {
+  private async postDocument(
+    panel: vscode.WebviewPanel,
+    document: SqliteDocument,
+    resetViewState = true,
+  ): Promise<void> {
     const settings = this.getEditorSettings(document.uri);
     const data = document.getData();
     if (settings.maxFileSizeMb > 0 && data.byteLength > settings.maxFileSizeMb * 1024 * 1024) {
@@ -284,7 +334,8 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       data: toArrayBuffer(data),
       settings,
       dirty: document.isDirty(),
-      resetViewState: true,
+      revision: document.getRevision(),
+      resetViewState,
     });
   }
 
@@ -293,7 +344,8 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     data: Uint8Array,
     label?: string,
     refreshPanels = false,
-  ): Promise<void> {
+    expectedRevision?: number,
+  ): Promise<SnapshotApplyResult> {
     let isRegisteringNewEdit = refreshPanels;
     const postSnapshot = async (snapshot: Uint8Array): Promise<void> => {
       await this.postToDocumentPanels(document, {
@@ -302,10 +354,11 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
         data: toArrayBuffer(snapshot),
         settings: this.getEditorSettings(document.uri),
         dirty: document.isDirty(snapshot, { isNewEdit: isRegisteringNewEdit }),
+        revision: document.getRevision(),
         resetViewState: false,
       });
     };
-    await applySnapshotDocumentChange({
+    const result = await applySnapshotDocumentChange({
       document,
       data,
       label: label ?? 'Edit SQLite database',
@@ -313,12 +366,18 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       postSnapshot,
       postAfterApply: refreshPanels,
       maxUndoMemoryBytes: this.getEditorSettings(document.uri).maxUndoMemoryBytes,
+      expectedRevision,
     });
     isRegisteringNewEdit = false;
+    if (!result.accepted) {
+      return result;
+    }
     await this.postToDocumentPanels(document, {
       type: 'documentStateChanged',
       dirty: document.isDirty(undefined, { isNewEdit: true }),
+      revision: result.revision,
     });
+    return result;
   }
 
   private getEditorSettings(uri: vscode.Uri): EditorSettings {
@@ -328,8 +387,19 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     );
   }
 
+  private async postDocumentToSiblingPanels(
+    document: SqliteDocument,
+    sourcePanel: vscode.WebviewPanel,
+  ): Promise<void> {
+    await Promise.all(this.registry.getPanels(document)
+      .filter((panel) => panel !== sourcePanel)
+      .map((panel) => this.postDocument(panel, document, false)));
+  }
+
   private async postToDocumentPanels(document: SqliteDocument, message: ExtensionMessage): Promise<void> {
-    await Promise.all(this.registry.getPanels(document).map((panel) => panel.webview.postMessage(message)));
+    await Promise.allSettled(
+      this.registry.getPanels(document).map((panel) => panel.webview.postMessage(message)),
+    );
   }
 
   private async saveTextDocument(document: SqliteDocument, message: SaveTextMessage): Promise<void> {

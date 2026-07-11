@@ -20,14 +20,20 @@ export type DatabaseChangedMessage = {
   type: 'databaseChanged';
   data: ArrayBuffer;
   label?: string;
-  baseRevision?: number;
+  baseRevision: number;
+};
+
+export type SaveRequestMessage = {
+  type: 'requestSave';
+  requestId: string;
+  revision: number;
 };
 
 export type WebviewMessage =
   | { type: 'ready' }
   | DatabaseChangedMessage
   | { type: 'copilotSelectionChanged'; context: SqliteSelectionUpdate }
-  | { type: 'requestSave' }
+  | SaveRequestMessage
   | { type: 'error'; message: string }
   | { type: 'clipboardWrite'; text: string }
   | { type: 'clipboardRead'; requestId: string }
@@ -39,17 +45,19 @@ export type WebviewMessage =
 export type DatabaseSavedMessage = {
   type: 'databaseSaved';
   dirty: boolean;
-  revision?: number;
+  revision: number;
+  requestId: string;
 };
 
 export type ExtensionMessage =
-  | { type: 'loadDatabase'; name: string; data: ArrayBuffer; settings: EditorSettings; dirty: boolean; resetViewState: boolean }
+  | { type: 'loadDatabase'; name: string; data: ArrayBuffer; settings: EditorSettings; dirty: boolean; revision: number; resetViewState: boolean }
   | { type: 'loadError'; message: string; settings: EditorSettings }
   | { type: 'settingsChanged'; settings: EditorSettings }
   | DatabaseSavedMessage
-  | { type: 'databaseSaveFailed'; message: string }
-  | { type: 'documentStateChanged'; dirty: boolean }
+  | { type: 'databaseSaveFailed'; message: string; revision: number; requestId: string }
+  | { type: 'documentStateChanged'; dirty: boolean; revision: number }
   | { type: 'clipboardText'; requestId: string; text: string };
+
 
 export type IncomingDatabaseChangeDecision = {
   accepted: boolean;
@@ -63,8 +71,7 @@ export function decideIncomingDatabaseChange({
   baseRevision?: number;
   currentRevision?: number;
 }): IncomingDatabaseChangeDecision {
-  const revisionAware = baseRevision !== undefined && currentRevision !== undefined;
-  const accepted = !revisionAware || baseRevision === currentRevision;
+  const accepted = baseRevision !== undefined && baseRevision === currentRevision;
   return {
     accepted,
     shouldRehydrate: !accepted,
@@ -103,22 +110,31 @@ export function createDatabaseSavedMessage({
   dirty,
   savedRevision,
   currentRevision,
+  requestId,
 }: {
   dirty: boolean;
-  savedRevision?: number;
-  currentRevision?: number;
+  savedRevision: number;
+  currentRevision: number;
+  requestId: string;
 }): DatabaseSavedMessage {
   const decision = decideSaveAcknowledgement({ dirty, savedRevision, currentRevision });
   return {
     type: 'databaseSaved',
     dirty: decision.dirty,
-    ...(savedRevision === undefined ? {} : { revision: savedRevision }),
+    revision: savedRevision,
+    requestId,
   };
 }
 
-export function createDatabaseSaveFailedMessage(error: unknown): Extract<ExtensionMessage, { type: 'databaseSaveFailed' }> {
+export function createDatabaseSaveFailedMessage(
+  error: unknown,
+  revision: number,
+  requestId: string,
+): Extract<ExtensionMessage, { type: 'databaseSaveFailed' }> {
   return {
     type: 'databaseSaveFailed',
     message: getErrorMessage(error),
+    revision,
+    requestId,
   };
 }

@@ -4,6 +4,7 @@ export class SqliteDocumentState {
   private data: Uint8Array;
   private savedFingerprint: string | undefined;
   private dataFingerprint: string | undefined;
+  private revision = 0;
 
   constructor(initialData: Uint8Array, savedData: Uint8Array | null = initialData) {
     this.data = initialData;
@@ -15,9 +16,22 @@ export class SqliteDocumentState {
     return this.data;
   }
 
-  updateData(data: Uint8Array): void {
+  getRevision(): number {
+    return this.revision;
+  }
+
+  getSnapshot(): { data: Uint8Array; revision: number } {
+    return {
+      data: new Uint8Array(this.data),
+      revision: this.revision,
+    };
+  }
+
+  updateData(data: Uint8Array): number {
     this.data = data;
     this.dataFingerprint = undefined;
+    this.revision += 1;
+    return this.revision;
   }
 
   markSaved(data: Uint8Array = this.data): void {
@@ -27,11 +41,13 @@ export class SqliteDocumentState {
     }
   }
 
-  replaceWithSavedData(data: Uint8Array): void {
+  replaceWithSavedData(data: Uint8Array): number {
     this.data = data;
     const savedFingerprint = this.fingerprint(data);
     this.savedFingerprint = savedFingerprint;
     this.dataFingerprint = savedFingerprint;
+    this.revision += 1;
+    return this.revision;
   }
 
   isDirty(

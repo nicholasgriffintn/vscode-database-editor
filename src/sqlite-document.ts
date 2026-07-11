@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 
+import { DocumentMutationQueue } from './document-mutation-queue';
 import { SqliteDocumentState } from './sqlite-document-state';
 
 export class SqliteDocument implements vscode.CustomDocument {
   private readonly disposeEmitter = new vscode.EventEmitter<void>();
   private readonly state: SqliteDocumentState;
+  private readonly mutationQueue = new DocumentMutationQueue();
 
   readonly onDidDispose = this.disposeEmitter.event;
 
@@ -35,8 +37,20 @@ export class SqliteDocument implements vscode.CustomDocument {
     return this.state.getData();
   }
 
-  updateData(data: Uint8Array): void {
-    this.state.updateData(data);
+  getRevision(): number {
+    return this.state.getRevision();
+  }
+
+  getSnapshot(): { data: Uint8Array; revision: number } {
+    return this.state.getSnapshot();
+  }
+
+  enqueueMutation<T>(mutation: () => PromiseLike<T> | T): Promise<T> {
+    return this.mutationQueue.enqueue(mutation);
+  }
+
+  updateData(data: Uint8Array): number {
+    return this.state.updateData(data);
   }
 
   isDirty(data?: Uint8Array, options?: { isNewEdit?: boolean }): boolean {

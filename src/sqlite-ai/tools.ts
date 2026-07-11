@@ -11,13 +11,15 @@ import { capRows, isAllowedModification, isReadOnlyQuery, quoteIdentifier } from
 export type SqliteToolDocument = {
   readonly uri: { toString(): string };
   getData(): Uint8Array;
+  getRevision(): number;
+  getSnapshot(): { data: Uint8Array; revision: number };
 };
 
 export type SqliteToolRegistry<TDocument extends SqliteToolDocument = SqliteToolDocument> = {
   listOpenDatabases(): OpenDatabaseSummary[];
   resolveDocument(uri?: string): TDocument | undefined;
   getSelectionContext(uri?: string): SqliteSelectionContext | undefined;
-  applyCopilotDatabaseChange(document: TDocument, data: Uint8Array, label: string): Promise<void>;
+  applyCopilotDatabaseChange(document: TDocument, data: Uint8Array, label: string, baseRevision: number): Promise<void>;
 };
 
 export type SqliteTools = {
@@ -113,6 +115,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
   async function openDatabase(input: { databaseUri?: string }): Promise<{
     document?: TDocument;
     db?: SqlJsDatabase;
+    revision?: number;
     close(): void;
     error?: vscode.LanguageModelToolResult;
   }> {
@@ -132,11 +135,13 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
     }
 
     const SQL = await options.loadSqlJs(options.extensionUri);
-    const db = new SQL.Database(document.getData());
+    const snapshot = document.getSnapshot();
+    const db = new SQL.Database(snapshot.data);
     configureDatabase(db);
     return {
       document,
       db,
+      revision: snapshot.revision,
       close: () => db.close(),
     };
   }
@@ -292,7 +297,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
         }
 
         const opened = await openDatabase(input);
-        if (opened.error || !opened.document || !opened.db) {
+        if (opened.error || !opened.document || !opened.db || opened.revision === undefined) {
           return opened.error;
         }
 
@@ -314,6 +319,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
             opened.document,
             data,
             `Copilot: ${input.statementName}`,
+            opened.revision,
           );
           return result({
             success: true,
@@ -361,7 +367,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
           return error('SQLite operation was cancelled.');
         }
         const opened = await openDatabase(input);
-        if (opened.error || !opened.document || !opened.db) return opened.error;
+        if (opened.error || !opened.document || !opened.db || opened.revision === undefined) return opened.error;
         let transactionStarted = false;
         try {
           throwIfCancelled(token);
@@ -381,6 +387,7 @@ export function createSqliteTools<TDocument extends SqliteToolDocument>(
             opened.document,
             data,
             `Copilot migration: ${input.migrationName}`,
+            opened.revision,
           );
           return result({ success: true, statementCount: input.statements.length, databaseUri: opened.document.uri.toString() });
         } catch (caught) {

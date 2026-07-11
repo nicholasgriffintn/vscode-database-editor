@@ -32,19 +32,11 @@ test('host-originated snapshot changes post updated bytes after registering the 
   assert.deepEqual(posted, [[2, 2]]);
 });
 
-test('host-originated snapshot changes do not mutate document when initial refresh fails', async () => {
+test('host-originated snapshot changes commit even when a disposed webview cannot refresh', async () => {
   const events = [];
-  const document = {
-    data: new Uint8Array([1, 2, 3]),
-    getData() {
-      return this.data;
-    },
-    updateData(data) {
-      this.data = data;
-    },
-  };
+  const document = createRevisionedDocument([1, 2, 3]);
 
-  await assert.rejects(() => applySnapshotDocumentChange({
+  const result = await applySnapshotDocumentChange({
     document,
     data: new Uint8Array([4, 5, 6]),
     label: 'Copilot migration',
@@ -53,9 +45,29 @@ test('host-originated snapshot changes do not mutate document when initial refre
       throw new Error('webview disposed');
     },
     postAfterApply: true,
-  }), /webview disposed/);
+    expectedRevision: 0,
+  });
 
+  assert.deepEqual(result, { accepted: true, revision: 1 });
+  assert.deepEqual([...document.getData()], [4, 5, 6]);
+  assert.equal(events.length, 1);
+});
+
+test('stale snapshot changes leave bytes, revision, and edit history unchanged', async () => {
+  const events = [];
+  const document = createRevisionedDocument([1, 2, 3], 2);
+
+  const result = await applySnapshotDocumentChange({
+    document,
+    data: new Uint8Array([9, 9, 9]),
+    expectedRevision: 1,
+    emitEdit: (event) => events.push(event),
+    postSnapshot: () => {},
+  });
+
+  assert.deepEqual(result, { accepted: false, currentRevision: 2 });
   assert.deepEqual([...document.getData()], [1, 2, 3]);
+  assert.equal(document.getRevision(), 2);
   assert.deepEqual(events, []);
 });
 
@@ -151,3 +163,26 @@ test('oversized snapshot changes fall back to content changes without retaining 
   assert.equal(typeof events[0].undo, 'undefined');
   assert.deepEqual(posted, []);
 });
+
+function createRevisionedDocument(values, revision = 0) {
+  return {
+    data: new Uint8Array(values),
+    revision,
+    queue: Promise.resolve(),
+    getData() {
+      return this.data;
+    },
+    getRevision() {
+      return this.revision;
+    },
+    updateData(data) {
+      this.data = data;
+      this.revision += 1;
+    },
+    enqueueMutation(operation) {
+      const result = this.queue.then(operation, operation);
+      this.queue = result.then(() => undefined, () => undefined);
+      return result;
+    },
+  };
+}

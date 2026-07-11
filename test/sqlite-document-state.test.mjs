@@ -62,6 +62,27 @@ test('restored backup remains dirty when its original file is unavailable', () =
   assert.equal(restored.isDirty(), false);
 });
 
+test('revisioned snapshots are immutable copies of the current bytes', () => {
+  const state = new SqliteDocumentState(new Uint8Array([1, 2]));
+  const snapshot = state.getSnapshot();
+
+  state.getData()[0] = 9;
+  assert.equal(snapshot.revision, 0);
+  assert.deepEqual([...snapshot.data], [1, 2]);
+});
+
+test('document revisions increase for every accepted byte replacement but not saves', () => {
+  const state = new SqliteDocumentState(new Uint8Array([1]));
+
+  assert.equal(state.getRevision(), 0);
+  state.updateData(new Uint8Array([2]));
+  assert.equal(state.getRevision(), 1);
+  state.markSaved();
+  assert.equal(state.getRevision(), 1);
+  state.replaceWithSavedData(new Uint8Array([3]));
+  assert.equal(state.getRevision(), 2);
+});
+
 test('a newly registered edit remains dirty even when its bytes match the saved baseline', () => {
   const state = new SqliteDocumentState(new Uint8Array([1, 2, 3]));
 

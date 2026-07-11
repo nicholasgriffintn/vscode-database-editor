@@ -359,8 +359,33 @@ test('modify tool prepares confirmation and applies changes through registry', a
 
   assert.equal(result.success, true);
   assert.equal(harness.appliedLabels.at(-1), 'Copilot: add person');
+  assert.deepEqual(harness.appliedBaseRevisions, [0]);
   const rows = selectRows(harness.document.getData(), 'SELECT name FROM people ORDER BY id');
   assert.deepEqual(rows.map((row) => row.name), ['Ada', 'Grace', 'Katherine']);
+});
+
+test('Copilot write rejects a stale private snapshot after an intervening edit', async () => {
+  const harness = createToolHarness({
+    accessMode: 'rw',
+    beforeApply(target) {
+      const db = new SQL.Database(target.getData());
+      db.run('INSERT INTO people (name) VALUES ("External")');
+      target.updateData(db.export());
+      db.close();
+    },
+  });
+
+  const result = await invokeJson(harness.tools.modify, {
+    statement: 'INSERT INTO people (name) VALUES ("Copilot")',
+    statementName: 'add Copilot person',
+    statementDescription: 'Adds a person',
+  });
+
+  assert.match(result.error, /changed while Copilot was working/i);
+  assert.deepEqual(
+    selectRows(harness.document.getData(), 'SELECT name FROM people ORDER BY id').map((row) => row.name),
+    ['Ada', 'Grace', 'External'],
+  );
 });
 
 test('write confirmations escape Markdown and show full SQL', async () => {
@@ -474,12 +499,14 @@ function createToolHarness({
   selectionContext,
   maxResultRows = 200,
   sensitiveColumnPatterns = [],
+  beforeApply,
 } = {}) {
   const document = createFixtureDocument();
   const secondDocument = additionalDatabase
     ? { ...createFixtureDocument(), uri: { toString: () => 'file:///second.sqlite' } }
     : undefined;
   const appliedLabels = [];
+  const appliedBaseRevisions = [];
   const registry = {
     listOpenDatabases() {
       return [
@@ -500,9 +527,14 @@ function createToolHarness({
       }
       return selectedObject ? { databaseUri, objectName: selectedObject, objectType: 'table' } : { databaseUri };
     },
-    async applyCopilotDatabaseChange(target, data, label) {
+    async applyCopilotDatabaseChange(target, data, label, baseRevision) {
+      beforeApply?.(target);
+      if (target.getRevision() !== baseRevision) {
+        throw new Error('The database changed while Copilot was working. Rerun the tool against the latest revision.');
+      }
       target.updateData(data);
       appliedLabels.push(label);
+      appliedBaseRevisions.push(baseRevision);
     },
   };
   const tools = createSqliteTools({
@@ -515,7 +547,7 @@ function createToolHarness({
     getQueryOptions: () => ({ maxResultRows, timeoutMs: 5_000, sensitiveColumnPatterns }),
   });
 
-  return { document, appliedLabels, tools };
+  return { document, appliedBaseRevisions, appliedLabels, tools };
 }
 
 function createTrackingSqlStatic(onStep) {
@@ -554,11 +586,19 @@ function createFixtureDocument() {
   return {
     uri: { toString: () => 'file:///fixture.sqlite' },
     data,
+    revision: 0,
     getData() {
       return this.data;
     },
+    getRevision() {
+      return this.revision;
+    },
+    getSnapshot() {
+      return { data: new Uint8Array(this.data), revision: this.revision };
+    },
     updateData(nextData) {
       this.data = nextData;
+      this.revision += 1;
     },
   };
 }
