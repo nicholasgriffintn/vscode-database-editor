@@ -79,8 +79,8 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      const databaseUri = provider.getActiveDocumentUri();
-      const databaseHint = databaseUri ? ` Use databaseUri "${databaseUri}".` : '';
+      const databaseHandle = provider.getActiveDocumentHandle();
+      const databaseHint = databaseHandle ? ` Use database handle "${databaseHandle}".` : '';
       await vscode.commands.executeCommand('workbench.action.chat.open', {
         query: `@sqlite /schema Inspect the active SQLite database.${databaseHint} Summarize the selected object or schema and await further instructions.`,
       });
@@ -292,12 +292,16 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     return this.registry.resolveDocument(uri);
   }
 
-  getActiveDocumentUri(): string | undefined {
-    return this.registry.getActiveDocumentUri();
+  getActiveDocumentHandle(): string | undefined {
+    return this.registry.getActiveDocumentHandle();
   }
 
   getSelectionContext(uri?: string): SqliteSelectionContext | undefined {
     return this.registry.getSelectionContext(uri);
+  }
+
+  getDatabaseHandle(uri: string): string | undefined {
+    return this.registry.getDatabaseHandle(uri);
   }
 
   async applyCopilotDatabaseChange(
