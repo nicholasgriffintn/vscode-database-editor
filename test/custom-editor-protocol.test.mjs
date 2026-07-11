@@ -4,8 +4,36 @@ import test from 'node:test';
 import {
   createDatabaseSaveFailedMessage,
   createDatabaseSavedMessage,
+  decideIncomingDatabaseChange,
   decideSaveAcknowledgement,
 } from '../dist/custom-editor-protocol.js';
+
+test('current incoming database changes are accepted without rehydration', () => {
+  assert.deepEqual(decideIncomingDatabaseChange({
+    baseRevision: 4,
+    currentRevision: 4,
+  }), {
+    accepted: true,
+    shouldRehydrate: false,
+  });
+});
+
+test('stale incoming database changes are rejected and rehydrated', () => {
+  assert.deepEqual(decideIncomingDatabaseChange({
+    baseRevision: 3,
+    currentRevision: 4,
+  }), {
+    accepted: false,
+    shouldRehydrate: true,
+  });
+});
+
+test('incoming database changes remain backward compatible before both revisions are wired', () => {
+  assert.deepEqual(decideIncomingDatabaseChange({ currentRevision: 4 }), {
+    accepted: true,
+    shouldRehydrate: false,
+  });
+});
 
 test('current save acknowledgements can clear the webview dirty state', () => {
   assert.deepEqual(decideSaveAcknowledgement({

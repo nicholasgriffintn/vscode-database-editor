@@ -94,6 +94,17 @@ test('views and blob cells do not expose inline editing', () => {
   });
 });
 
+test.todo('generated table columns render as read-only cells', () => {
+  assert.deepEqual(getCellInteraction({
+    tableType: 'table',
+    column: { name: 'full_name', generated: 'virtual', readOnly: true },
+    value: 'Ada Lovelace',
+  }), {
+    disabled: true,
+    title: 'Generated columns are read-only',
+  });
+});
+
 test('cell clipboard text preserves editable values and describes non-text values', () => {
   assert.equal(getCellClipboardText('Ada'), 'Ada');
   assert.equal(getCellClipboardText(42), '42');

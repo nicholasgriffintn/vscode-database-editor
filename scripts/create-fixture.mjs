@@ -338,7 +338,7 @@ db.run(`
   INSERT INTO release_unique_names (name) VALUES ('existing');
 `);
 
-for (let index = 1; index <= 12; index += 1) {
+for (let index = 1; index <= 1005; index += 1) {
   db.run(
     'INSERT INTO release_memberships (tenant_id, user_id, label) VALUES (?, ?, ?)',
     [Math.ceil(index / 4), ((index - 1) % 4) + 1, `membership ${index}`],

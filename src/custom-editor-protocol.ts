@@ -15,9 +15,16 @@ export type SaveBinaryMessage = {
   content: ArrayBuffer;
 };
 
+export type DatabaseChangedMessage = {
+  type: 'databaseChanged';
+  data: ArrayBuffer;
+  label?: string;
+  baseRevision?: number;
+};
+
 export type WebviewMessage =
   | { type: 'ready' }
-  | { type: 'databaseChanged'; data: ArrayBuffer; label?: string }
+  | DatabaseChangedMessage
   | { type: 'copilotSelectionChanged'; context: SqliteSelectionUpdate }
   | { type: 'requestSave' }
   | { type: 'error'; message: string }
@@ -42,6 +49,26 @@ export type ExtensionMessage =
   | { type: 'databaseSaveFailed'; message: string }
   | { type: 'documentStateChanged'; dirty: boolean }
   | { type: 'clipboardText'; requestId: string; text: string };
+
+export type IncomingDatabaseChangeDecision = {
+  accepted: boolean;
+  shouldRehydrate: boolean;
+};
+
+export function decideIncomingDatabaseChange({
+  baseRevision,
+  currentRevision,
+}: {
+  baseRevision?: number;
+  currentRevision?: number;
+}): IncomingDatabaseChangeDecision {
+  const revisionAware = baseRevision !== undefined && currentRevision !== undefined;
+  const accepted = !revisionAware || baseRevision === currentRevision;
+  return {
+    accepted,
+    shouldRehydrate: !accepted,
+  };
+}
 
 export type SaveAcknowledgementDecision = {
   acknowledgedRevision?: number;
