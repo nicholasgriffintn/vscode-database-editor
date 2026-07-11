@@ -306,10 +306,21 @@ export function hasRowid(db, tableName) {
 
 export function getRowCount(db, tableName, columns) {
   try {
-    return queryAll(db, buildTableCount({ tableName, columns, filter: '' }).sql)[0]?.count ?? 0;
+    return countTableRows(db, { tableName, columns });
   } catch {
     return 0;
   }
+}
+
+export function countTableRows(db, {
+  tableName,
+  columns,
+  filter = '',
+  columnFilters = {},
+  options = {},
+}) {
+  const query = buildTableCount({ tableName, columns, filter, columnFilters });
+  return queryAll(db, query.sql, query.params, options)[0]?.count ?? 0;
 }
 
 function readIndexedColumns(db, tableName) {

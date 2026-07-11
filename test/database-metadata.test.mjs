@@ -6,6 +6,7 @@ import {
   createRowCountFilterKey,
   formatRowCount,
   getUnknownCountRowWindow,
+  loadTableCountsInBackground,
   resolveUnknownCountRows,
 } from '../media/database-metadata.mjs';
 
@@ -69,4 +70,27 @@ test('unknown-count views use a limit-plus-one window without exact counts', () 
     totalRows: 22,
     hasMore: false,
   });
+});
+
+test('table counts load cooperatively in the background and skip views', async () => {
+  const events = [];
+  const objects = [
+    { name: 'people', type: 'table', rowCount: null },
+    { name: 'expensive_view', type: 'view', rowCount: null },
+    { name: 'teams', type: 'table', rowCount: 3 },
+    { name: 'audit', type: 'table', rowCount: null },
+  ];
+
+  await loadTableCountsInBackground({
+    objects,
+    schedule: async () => events.push('yield'),
+    load: (object) => ({ people: 2, audit: 9 })[object.name],
+    onLoaded: (object, count) => events.push(`${object.name}:${count}`),
+  });
+
+  assert.deepEqual(events, ['yield', 'people:2', 'yield', 'audit:9']);
+  assert.equal(objects[0].rowCount, 2);
+  assert.equal(objects[1].rowCount, null);
+  assert.equal(objects[2].rowCount, 3);
+  assert.equal(objects[3].rowCount, 9);
 });

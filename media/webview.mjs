@@ -12,6 +12,7 @@ import {
   createRowCountFilterKey,
   formatRowCount,
   getUnknownCountRowWindow,
+  loadTableCountsInBackground,
   resolveUnknownCountRows,
 } from './database-metadata.mjs';
 import {
@@ -74,6 +75,7 @@ import {
 } from './schema-graph.mjs';
 import {
   configureDatabase,
+  countTableRows,
   getSchemaObjects,
   queryAll,
   queryGridRows,
@@ -89,7 +91,6 @@ import {
   buildSqlDump,
   buildDelete,
   buildInsert,
-  buildTableCount,
   buildTableSelect,
   buildUpdate,
   describeValue,
@@ -128,6 +129,7 @@ let db = null;
 let databaseName = 'SQLite database';
 let tables = [];
 const rowCountCache = createRowCountCache();
+let metadataLoadGeneration = 0;
 let activeTableName = null;
 let activeView = 'data';
 let filter = '';
@@ -1097,6 +1099,8 @@ function updateRefreshUi() {
 }
 
 async function refreshTables() {
+  const generation = ++metadataLoadGeneration;
+  const revision = currentRevision;
   schemaObjects = getSchemaObjects(db);
   tables = readTableMetadata(db, schemaObjects);
 
@@ -1107,6 +1111,30 @@ async function refreshTables() {
   renderSchema();
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
   await refreshRows();
+  void loadTableCountsInBackground({
+    objects: tables,
+    schedule: () => new Promise((resolve) => window.setTimeout(resolve, 0)),
+    isCurrent: () => generation === metadataLoadGeneration && revision === currentRevision,
+    load: (table) => rowCountCache.get({
+      revision,
+      objectName: table.name,
+      filterKey: createRowCountFilterKey(),
+      load: () => countTableRows(db, {
+        tableName: table.name,
+        columns: table.columns,
+        options: getQueryOptions(),
+      }),
+    }),
+    onLoaded: () => renderSidebar(),
+    onError: (table) => {
+      table.rowCount = undefined;
+      renderSidebar();
+    },
+  }).then(() => {
+    if (generation === metadataLoadGeneration && revision === currentRevision) {
+      renderSchemaGraph();
+    }
+  });
 }
 
 async function refreshRows() {
@@ -1141,10 +1169,13 @@ async function refreshRows() {
       revision: currentRevision,
       objectName: table.name,
       filterKey,
-      load: () => {
-      const countQuery = buildTableCount({ tableName: table.name, columns: table.columns, filter, columnFilters });
-        return queryAll(db, countQuery.sql, countQuery.params, getQueryOptions())[0]?.count ?? 0;
-      },
+      load: () => countTableRows(db, {
+        tableName: table.name,
+        columns: table.columns,
+        filter,
+        columnFilters,
+        options: getQueryOptions(),
+      }),
     });
     if (!hasActiveGridFilters()) {
       table.rowCount = actualTotalRows;
@@ -1394,7 +1425,7 @@ function appendObjectSection(label, objects) {
     const tagName = interaction.browsable ? 'button' : 'div';
     const meta = interaction.browsable
       ? formatRowCount(object.rowCount, {
-        loading: object.type === 'table' && object.name === activeTableName && object.rowCount === null,
+        loading: object.type === 'table' && object.rowCount === null,
       })
       : object.tableName;
     elements.sidebar.append(createElement(tagName, {

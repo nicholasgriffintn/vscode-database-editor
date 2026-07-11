@@ -73,6 +73,32 @@ export function resolveUnknownCountRows(rows, { offset, retainedLimit }) {
   };
 }
 
+export async function loadTableCountsInBackground({
+  objects,
+  load,
+  onLoaded,
+  onError = () => {},
+  schedule = () => Promise.resolve(),
+  isCurrent = () => true,
+}) {
+  for (const object of objects) {
+    if (object.type !== 'table' || Number.isFinite(object.rowCount)) {
+      continue;
+    }
+    await schedule();
+    if (!isCurrent()) {
+      return;
+    }
+    try {
+      const count = load(object);
+      object.rowCount = count;
+      onLoaded(object, count);
+    } catch (error) {
+      onError(object, error);
+    }
+  }
+}
+
 function createCountKey(revision, objectName, filterKey) {
   return JSON.stringify([Number(revision), String(objectName), String(filterKey)]);
 }
