@@ -1,4 +1,5 @@
 import type { EditorSettings } from './editor-settings';
+import { getErrorMessage } from './utilities/errors';
 import type { SqliteSelectionUpdate } from './sqlite-ai/sqlite-document-registry';
 
 export type SaveTextMessage = {
@@ -118,6 +119,6 @@ export function createDatabaseSavedMessage({
 export function createDatabaseSaveFailedMessage(error: unknown): Extract<ExtensionMessage, { type: 'databaseSaveFailed' }> {
   return {
     type: 'databaseSaveFailed',
-    message: error instanceof Error ? error.message : String(error),
+    message: getErrorMessage(error),
   };
 }

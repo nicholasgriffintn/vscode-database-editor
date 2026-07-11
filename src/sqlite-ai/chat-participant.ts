@@ -1,5 +1,7 @@
 import type * as vscode from 'vscode';
 
+import { getErrorMessage } from '../utilities/errors';
+
 import type { SqliteSelectionContext } from './sqlite-document-registry';
 import { SQLITE_TOOL_NAMES, type SqliteToolRegistry } from './tools';
 
@@ -126,7 +128,7 @@ export function createSqliteChatParticipant(
         stream.markdown('SQLite request cancelled.');
         return { metadata: { cancelled: true } };
       }
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       stream.markdown(`SQLite Copilot could not complete this request: ${message}`);
       return { metadata: { error: message } };
     }

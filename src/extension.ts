@@ -20,32 +20,20 @@ import { SqliteDocumentRegistry } from './sqlite-ai/sqlite-document-registry';
 import type { SqliteSelectionContext, SqliteSelectionUpdate } from './sqlite-ai/sqlite-document-registry';
 import { loadSqlJs } from './sqlite-ai/sqljs-host';
 import { createSqliteTools } from './sqlite-ai/tools';
+import { toArrayBuffer } from './utilities/binary';
+import { createCopilotConfigurationReaders } from './utilities/copilot-configuration';
+import { dirname } from './utilities/path';
+import { createEditorWebviewHtml } from './utilities/webview-html';
 
 const viewType = 'databaseEditor.sqlite';
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new SqliteEditorProvider(context);
-  const getCopilotEnabled = () => vscode.workspace
-    .getConfiguration('databaseEditor.copilot')
-    .get('enable', true);
-  const getAccessMode = () => vscode.workspace
-    .getConfiguration('databaseEditor.copilot')
-    .get<'ro' | 'rw'>('accessMode', 'ro');
-  const getQueryOptions = () => {
-    const configuration = vscode.workspace.getConfiguration('databaseEditor.copilot');
-    return {
-      maxResultRows: configuration.get('maxResultRows', 200),
-      timeoutMs: configuration.get('queryTimeoutMs', 5_000),
-      sensitiveColumnPatterns: configuration.get<string[]>('sensitiveColumnPatterns', [
-        'password',
-        'passwd',
-        'token',
-        'secret',
-        'api[_-]?key',
-        'ssn',
-      ]),
-    };
-  };
+  const {
+    getCopilotEnabled,
+    getAccessMode,
+    getQueryOptions,
+  } = createCopilotConfigurationReaders(vscode.workspace);
   const tools = createSqliteTools({
     vscode,
     registry: provider,
@@ -139,7 +127,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       ],
     };
 
-    webview.html = this.getHtml(webview);
+    webview.html = createEditorWebviewHtml(webview, this.context.extensionUri);
     this.registry.registerPanel(document, webviewPanel);
 
     const configurationSubscription = vscode.workspace.onDidChangeConfiguration(async (event) => {
@@ -375,80 +363,4 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     await vscode.workspace.fs.writeFile(destination, new Uint8Array(message.content));
     await vscode.window.showInformationMessage(`Exported ${message.fileName}.`);
   }
-
-  private getHtml(webview: vscode.Webview): string {
-    const nonce = getNonce();
-    const resourceVersion = Date.now().toString(36);
-    const extensionUri = this.context.extensionUri.toString();
-    const sqlJsUri = webview.asWebviewUri(vscode.Uri.joinPath(
-      this.context.extensionUri,
-      'media',
-      'vendor',
-      'sqljs',
-      'sql-wasm.js',
-    ));
-    const wasmUri = webview.asWebviewUri(vscode.Uri.joinPath(
-      this.context.extensionUri,
-      'media',
-      'vendor',
-      'sqljs',
-      'sql-wasm.wasm',
-    ));
-    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview.mjs'))
-      .with({ query: `v=${resourceVersion}` });
-    const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'styles.css'))
-      .with({ query: `v=${resourceVersion}` });
-    const csp = [
-      "default-src 'none'",
-      `style-src ${webview.cspSource}`,
-      `script-src 'nonce-${nonce}' 'wasm-unsafe-eval' ${webview.cspSource}`,
-      `img-src ${webview.cspSource} blob:`,
-      `connect-src ${webview.cspSource}`,
-      `font-src ${webview.cspSource}`,
-    ].join('; ');
-
-    return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="${csp}">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link nonce="${nonce}" rel="stylesheet" href="${styleUri}">
-  <title>SQLite Database Editor</title>
-</head>
-<body>
-  <div id="app" data-wasm-uri="${wasmUri}" data-extension-uri="${escapeAttribute(extensionUri)}" data-resource-version="${resourceVersion}"></div>
-  <script nonce="${nonce}" src="${sqlJsUri}"></script>
-  <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
-</body>
-</html>`;
-  }
-}
-
-function getNonce(): string {
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let text = '';
-  for (let i = 0; i < 32; i += 1) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
-}
-
-function escapeAttribute(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-function toArrayBuffer(data: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(data.byteLength);
-  copy.set(data);
-  return copy.buffer;
-}
-
-function dirname(path: string): string {
-  const index = path.lastIndexOf('/');
-  return index <= 0 ? '/' : path.slice(0, index);
 }

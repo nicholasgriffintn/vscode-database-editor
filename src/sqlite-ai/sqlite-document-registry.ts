@@ -1,5 +1,7 @@
 import type * as vscode from 'vscode';
 
+import { basename } from '../utilities/path';
+
 export interface RegistrySqliteDocument {
   readonly uri: vscode.Uri;
   getData(): Uint8Array;
@@ -125,9 +127,4 @@ export class SqliteDocumentRegistry<TDocument extends RegistrySqliteDocument> {
   getPanels(document: TDocument): vscode.WebviewPanel[] {
     return [...(this.openDocuments.get(document.uri.toString())?.panels ?? [])];
   }
-}
-
-function basename(path: string): string {
-  const index = path.lastIndexOf('/');
-  return index === -1 ? path : path.slice(index + 1);
 }

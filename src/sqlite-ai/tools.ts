@@ -1,5 +1,9 @@
 import type * as vscode from 'vscode';
 
+import { getErrorMessage } from '../utilities/errors';
+import { escapeMarkdown, formatSqlCodeBlock } from '../utilities/markdown';
+import { basenameFromUri } from '../utilities/path';
+import { sqlLiteral } from '../utilities/sql';
 import type { SqlJsDatabase, SqlJsStatic } from './sqljs-host';
 import type { OpenDatabaseSummary, SqliteSelectionContext } from './sqlite-document-registry';
 import { capRows, isAllowedModification, isReadOnlyQuery, quoteIdentifier } from './sql-safety';
@@ -438,7 +442,7 @@ function getDatabaseContext(document: SqliteToolDocument, db: SqlJsDatabase, inp
   const objects = getSchemaObjects(db, input.objectName);
   const database = {
     uri: document.uri.toString(),
-    name: basename(document.uri.toString()),
+    name: basenameFromUri(document.uri.toString()),
   };
   if (!input.objectName) {
     const offset = Math.max(0, Math.floor(input.offset ?? 0));
@@ -787,21 +791,6 @@ function getColumns(db: SqlJsDatabase, sql: string): string[] {
   }
 }
 
-function sqlLiteral(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
-function formatSqlCodeBlock(sql: string): string {
-  const trimmed = sql.trim();
-  const longestBacktickRun = Math.max(0, ...trimmed.match(/`+/g)?.map((match) => match.length) ?? []);
-  const fence = '`'.repeat(Math.max(3, longestBacktickRun + 1));
-  return `${fence}sql\n${trimmed}\n${fence}`;
-}
-
-function escapeMarkdown(value: string): string {
-  return String(value).replace(/[\\`*_{}\[\]()#+\-!|>]/g, '\\$&');
-}
-
 function describeDatabaseTarget(registry: SqliteToolRegistry, requestedUri?: string): string {
   const databases = registry.listOpenDatabases();
   const database = requestedUri
@@ -811,13 +800,4 @@ function describeDatabaseTarget(registry: SqliteToolRegistry, requestedUri?: str
   return database
     ? `**${escapeMarkdown(database.name)}** (\`${escapeMarkdown(uri)}\`)`
     : `\`${escapeMarkdown(uri)}\``;
-}
-
-function basename(uri: string): string {
-  const slashIndex = uri.lastIndexOf('/');
-  return slashIndex === -1 ? uri : decodeURIComponent(uri.slice(slashIndex + 1));
-}
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
