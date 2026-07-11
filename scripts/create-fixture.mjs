@@ -42,11 +42,10 @@ function createPNG(width, height, r, g, b, a = 255) {
   ihdrData[11] = 0; // filter
   ihdrData[12] = 0; // interlace
 
-  // Build raw pixel data: filter byte (0) + RGBA pixels per row
   const rawRows = [];
   const pixel = Buffer.from([r, g, b, a]);
   for (let y = 0; y < height; y++) {
-    rawRows.push(0); // filter byte: None
+    rawRows.push(0);
     for (let x = 0; x < width; x++) {
       rawRows.push(...pixel);
     }
@@ -235,6 +234,114 @@ for (let index = 1; index <= 500; index++) {
       index % 2 === 0 ? 'alpha,beta' : 'gamma,delta,epsilon',
       index % 7 === 0 ? null : `Wide row ${index}`,
     ],
+  );
+}
+
+// v1 release-regression objects. Keep these cases in one generated fixture so
+// manual validation and later integration tests exercise the same edge cases.
+db.run(`
+  CREATE TABLE release_parents (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE
+  );
+  CREATE TABLE release_children (
+    id INTEGER PRIMARY KEY,
+    parent_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    FOREIGN KEY (parent_id) REFERENCES release_parents(id)
+      ON UPDATE CASCADE
+      ON DELETE RESTRICT
+  );
+  CREATE TABLE release_cascade_children (
+    id INTEGER PRIMARY KEY,
+    parent_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    FOREIGN KEY (parent_id) REFERENCES release_parents(id)
+      ON DELETE CASCADE
+  );
+  INSERT INTO release_parents (id, name) VALUES (10, 'restricted parent');
+  INSERT INTO release_parents (id, name) VALUES (20, 'cascade parent');
+  INSERT INTO release_children (parent_id, name) VALUES (10, 'restricted child');
+  INSERT INTO release_cascade_children (parent_id, name) VALUES (20, 'cascade child');
+
+  CREATE TABLE release_alias_collision (
+    id INTEGER PRIMARY KEY,
+    __database_editor_rowid TEXT NOT NULL
+  );
+  INSERT INTO release_alias_collision (id, __database_editor_rowid)
+  VALUES (1, 'displayed value');
+
+  CREATE TABLE release_declared_rowid (
+    rowid TEXT NOT NULL,
+    value TEXT NOT NULL
+  );
+  INSERT INTO release_declared_rowid (rowid, value)
+  VALUES ('declared rowid', 'target');
+
+  CREATE TABLE release_large_rowid (value TEXT NOT NULL);
+  INSERT INTO release_large_rowid (rowid, value)
+  VALUES (9007199254740993, 'above Number.MAX_SAFE_INTEGER');
+
+  CREATE TABLE release_memberships (
+    tenant_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, user_id)
+  ) WITHOUT ROWID;
+
+  CREATE TABLE release_generated (
+    id INTEGER PRIMARY KEY,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    virtual_name TEXT GENERATED ALWAYS AS (first_name || ' ' || last_name) VIRTUAL,
+    stored_length INTEGER GENERATED ALWAYS AS (length(first_name) + length(last_name)) STORED
+  );
+  INSERT INTO release_generated (first_name, last_name) VALUES ('Ada', 'Lovelace');
+
+  CREATE TABLE release_duplicate_source (value TEXT NOT NULL);
+  INSERT INTO release_duplicate_source (value) VALUES ('same'), ('same');
+  CREATE VIEW release_duplicate_view AS
+    SELECT value FROM release_duplicate_source;
+
+  CREATE TABLE release_secrets (
+    id INTEGER PRIMARY KEY,
+    password TEXT NOT NULL,
+    public_value TEXT NOT NULL
+  );
+  INSERT INTO release_secrets (password, public_value)
+  VALUES ('fixture-secret', 'safe');
+  CREATE VIEW release_public_secrets AS
+    SELECT id, password AS value, public_value FROM release_secrets;
+  CREATE VIEW release_nested_secrets AS
+    SELECT value AS renamed_value, public_value FROM release_public_secrets;
+
+  CREATE TABLE release_audit_source (
+    id INTEGER PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  CREATE TABLE release_audit_log (
+    source_id INTEGER NOT NULL,
+    value TEXT NOT NULL
+  );
+  CREATE TRIGGER release_audit_insert
+  AFTER INSERT ON release_audit_source
+  BEGIN
+    INSERT INTO release_audit_log (source_id, value) VALUES (NEW.id, NEW.value);
+  END;
+  INSERT INTO release_audit_source (value) VALUES ('created once');
+
+  CREATE TABLE release_transaction_target (value TEXT NOT NULL);
+  CREATE TABLE release_unique_names (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE
+  );
+  INSERT INTO release_unique_names (name) VALUES ('existing');
+`);
+
+for (let index = 1; index <= 12; index += 1) {
+  db.run(
+    'INSERT INTO release_memberships (tenant_id, user_id, label) VALUES (?, ?, ?)',
+    [Math.ceil(index / 4), ((index - 1) % 4) + 1, `membership ${index}`],
   );
 }
 

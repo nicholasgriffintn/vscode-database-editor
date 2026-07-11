@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import initSqlJs from 'sql.js';
@@ -13,7 +14,7 @@ import {
   runWrite,
   runWriteBatch,
 } from '../media/sqlite-client.mjs';
-import { analyzeSqlScript } from '../media/sql-utils.mjs';
+import { analyzeSqlScript, buildTableSelect } from '../media/sql-utils.mjs';
 
 async function createDatabase() {
   const SQL = await initSqlJs({
@@ -67,12 +68,129 @@ test('discovers SQLite objects and table metadata', async () => {
   db.close();
 });
 
+test.todo('configures every database connection with enforced foreign keys', async () => {
+  const db = await createDatabase();
+  const { configureDatabase } = await import('../media/sqlite-client.mjs');
+
+  configureDatabase(db);
+  db.run('CREATE TABLE parents (id INTEGER PRIMARY KEY)');
+  db.run('CREATE TABLE children (parent_id INTEGER REFERENCES parents(id) ON UPDATE CASCADE ON DELETE RESTRICT)');
+  db.run('CREATE TABLE cascade_children (parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE)');
+  db.run('INSERT INTO parents (id) VALUES (1), (2)');
+  db.run('INSERT INTO children (parent_id) VALUES (1)');
+  db.run('INSERT INTO cascade_children (parent_id) VALUES (2)');
+
+  assert.equal(rows(db, 'PRAGMA foreign_keys')[0][0], 1);
+  assert.throws(() => db.run('INSERT INTO children (parent_id) VALUES (999)'), /FOREIGN KEY/);
+  db.run('UPDATE parents SET id = 3 WHERE id = 1');
+  assert.equal(rows(db, 'SELECT parent_id FROM children')[0][0], 3);
+  assert.throws(() => db.run('DELETE FROM parents WHERE id = 3'), /FOREIGN KEY/);
+  db.run('DELETE FROM parents WHERE id = 2');
+  assert.equal(rows(db, 'SELECT COUNT(*) FROM cascade_children')[0][0], 0);
+  db.close();
+
+  const webviewSource = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
+  const toolsSource = await readFile(new URL('../src/sqlite-ai/tools.ts', import.meta.url), 'utf8');
+  assert.match(
+    webviewSource,
+    /const nextDatabase = new SQL\.Database\([^;]+\);\s*configureDatabase\(nextDatabase\);/,
+  );
+  assert.match(toolsSource, /configureDatabase\(db\);/);
+});
+
+test.todo('discovers virtual and stored generated columns as read-only metadata', async () => {
+  const db = await createDatabase();
+  db.run(`CREATE TABLE generated_people (
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    full_name TEXT GENERATED ALWAYS AS (first_name || ' ' || last_name) VIRTUAL,
+    name_length INTEGER GENERATED ALWAYS AS (length(first_name) + length(last_name)) STORED
+  )`);
+
+  const table = readTableMetadata(db, getSchemaObjects(db))
+    .find((candidate) => candidate.name === 'generated_people');
+
+  assert.deepEqual(table.columns.map((column) => ({
+    name: column.name,
+    generated: column.generated,
+    readOnly: column.readOnly,
+  })), [
+    { name: 'first_name', generated: false, readOnly: false },
+    { name: 'last_name', generated: false, readOnly: false },
+    { name: 'full_name', generated: 'virtual', readOnly: true },
+    { name: 'name_length', generated: 'stored', readOnly: true },
+  ]);
+  db.close();
+});
+
+test.todo('orders real WITHOUT ROWID chunks by canonical composite primary-key metadata', async () => {
+  const db = await createDatabase();
+  db.run('CREATE TABLE memberships (tenant_id INTEGER, user_id INTEGER, label TEXT, PRIMARY KEY (tenant_id, user_id)) WITHOUT ROWID');
+  for (let index = 0; index < 12; index += 1) {
+    db.run('INSERT INTO memberships VALUES (?, ?, ?)', [Math.floor(index / 4), index % 4, `row ${index}`]);
+  }
+
+  const table = readTableMetadata(db, getSchemaObjects(db))
+    .find((candidate) => candidate.name === 'memberships');
+  const firstQuery = buildTableSelect({
+    tableName: table.name,
+    columns: table.columns,
+    includeRowid: table.hasRowid,
+    limit: 5,
+    offset: 0,
+  });
+  const secondQuery = buildTableSelect({
+    tableName: table.name,
+    columns: table.columns,
+    includeRowid: table.hasRowid,
+    limit: 5,
+    offset: 5,
+  });
+
+  assert.match(firstQuery.sql, /ORDER BY "tenant_id" ASC, "user_id" ASC/);
+  const combined = [
+    ...queryAll(db, firstQuery.sql, firstQuery.params),
+    ...queryAll(db, secondQuery.sql, secondQuery.params),
+  ];
+  assert.equal(new Set(combined.map((row) => `${row.tenant_id}:${row.user_id}`)).size, 10);
+  db.close();
+});
+
+test.todo('preserves rowid identity above Number.MAX_SAFE_INTEGER without rounding', async () => {
+  const db = await createDatabase();
+  db.run('CREATE TABLE large_rowids (value TEXT)');
+  db.run("INSERT INTO large_rowids (rowid, value) VALUES (9007199254740993, 'target')");
+
+  const [row] = queryAll(db, 'SELECT rowid AS identity FROM large_rowids');
+  assert.equal(row.identity, 9007199254740993n);
+  db.close();
+});
+
 test('rolls back failed writes', async () => {
   const db = await createDatabase();
 
   db.run('CREATE TABLE people (name TEXT NOT NULL)');
   assert.throws(() => runWrite(db, 'INSERT INTO people (name) VALUES (?)', [null]), /NOT NULL/);
   assert.deepEqual(queryAll(db, 'SELECT * FROM people'), []);
+  db.close();
+});
+
+test('constraint and duplicate-schema failures leave the existing database unchanged', async () => {
+  const db = await createDatabase();
+  db.run('CREATE TABLE unique_names (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)');
+  db.run("INSERT INTO unique_names (name) VALUES ('existing')");
+
+  assert.throws(
+    () => runWrite(db, 'INSERT INTO unique_names (name) VALUES (?)', ['existing']),
+    /UNIQUE constraint failed/,
+  );
+  assert.deepEqual(queryAll(db, 'SELECT name FROM unique_names'), [{ name: 'existing' }]);
+
+  assert.throws(
+    () => runWrite(db, 'CREATE TABLE unique_names (id INTEGER PRIMARY KEY)'),
+    /already exists/,
+  );
+  assert.deepEqual(queryAll(db, 'PRAGMA table_info("unique_names")').map((column) => column.name), ['id', 'name']);
   db.close();
 });
 
@@ -169,6 +287,29 @@ test('does not wrap scripts that provide explicit transaction control', async ()
 
   assert.equal(result.changed, true);
   assert.deepEqual(rows(db, 'SELECT name FROM people ORDER BY id'), [['Ada'], ['Grace']]);
+  db.close();
+});
+
+test.todo('rejects explicit SQL scripts that leave a transaction open', async () => {
+  const db = await createPeopleDatabase();
+  const sql = "BEGIN; INSERT INTO people (name) VALUES ('Grace');";
+
+  assert.throws(
+    () => runSqlScript(db, sql, analyzeSqlScript(sql)),
+    /must include COMMIT, ROLLBACK, or matching RELEASE/i,
+  );
+  assert.equal(rows(db, 'PRAGMA transaction_state')[0]?.[0] ?? 'NONE', 'NONE');
+  db.close();
+});
+
+test.todo('rejects explicit SQL scripts that leave nested savepoints open', async () => {
+  const db = await createPeopleDatabase();
+  const sql = "SAVEPOINT outer; SAVEPOINT inner; INSERT INTO people (name) VALUES ('Grace'); RELEASE inner;";
+
+  assert.throws(
+    () => runSqlScript(db, sql, analyzeSqlScript(sql)),
+    /matching RELEASE/i,
+  );
   db.close();
 });
 

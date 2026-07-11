@@ -1592,7 +1592,6 @@ function renderGrid({ appendFrom = null } = {}) {
   });
   const rowNumberStyle = getRowNumberColumnStyle({ columnWidth: columnWidths.__rowNumber });
 
-  // Row # column (sticky top-left corner)
   const selectAllState = getSelectAllRowsState({ visibleRows, selectedRowKeys });
   const selectAllCheckbox = createElement('input', {
     className: 'row-select-checkbox',
@@ -1751,7 +1750,6 @@ function renderGrid({ appendFrom = null } = {}) {
       attributes: { 'data-row': String(rowIndex) },
     });
 
-    // Row # cell (sticky top-left corner)
     const rowNumCell = createElement('td', {
       className: [
         'row-number-cell',

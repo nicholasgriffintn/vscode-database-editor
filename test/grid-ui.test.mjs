@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -112,6 +113,31 @@ test('row selection keys prefer rowid and fall back to sorted primary keys', () 
   );
 });
 
+test.todo('duplicate browse-only view rows receive distinct visible-position selection keys', () => {
+  const first = getRowSelectionKey({
+    kind: 'visiblePosition',
+    resultId: 'release_duplicate_view:1',
+    position: 0,
+  });
+  const second = getRowSelectionKey({
+    kind: 'visiblePosition',
+    resultId: 'release_duplicate_view:1',
+    position: 1,
+  });
+
+  assert.notEqual(first, second);
+  assert.match(first, /^position:/);
+  assert.match(second, /^position:/);
+});
+
+test.todo('BigInt row identities serialize without colliding with rounded numbers', () => {
+  const exact = getRowSelectionKey({ kind: 'rowid', value: 9007199254740993n });
+  const rounded = getRowSelectionKey({ kind: 'rowid', value: 9007199254740992n });
+
+  assert.notEqual(exact, rounded);
+  assert.equal(exact, 'rowid:9007199254740993');
+});
+
 test('selected visible rows are returned in current visible order', () => {
   const visibleRows = [
     { identity: { rowid: 3, primaryKey: {} }, values: { id: 3 } },
@@ -169,6 +195,23 @@ test('row actions are per-row and table-only', () => {
     { action: 'delete-row', label: 'Delete row', rowIndex: 2, disabled: false },
   ]);
   assert.deepEqual(getRowActions({ tableType: 'view', rowIndex: 2 }), []);
+});
+
+test.todo('failed insert and schema submissions retain dialog input and active-table state', async () => {
+  const source = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(
+    source,
+    /await insertRow\(table, form\);\s*dialog\.close\(\);/,
+  );
+  assert.doesNotMatch(
+    source,
+    /await onSubmit\(readSchemaForm\(form, fields\)\);\s*dialog\.close\(\);/,
+  );
+  assert.doesNotMatch(
+    source,
+    /activeTableName = values\.(?:tableName|newName)\.trim\(\);\s*await applySchemaChange/,
+  );
 });
 
 test('pager state belongs to the bottom-right grid footer', () => {

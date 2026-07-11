@@ -175,6 +175,32 @@ test('query tool redacts quoted sensitive source columns when aliased', async ()
   assert.deepEqual(result.rows, [{ value: '[REDACTED]' }, { value: '[REDACTED]' }]);
 });
 
+test.todo('query tool follows sensitive lineage through persisted and nested views', async () => {
+  const harness = createToolHarness({ sensitiveColumnPatterns: ['name'] });
+  const db = new SQL.Database(harness.document.getData());
+  db.run('CREATE VIEW public_people AS SELECT name AS value FROM people');
+  db.run('CREATE VIEW nested_people AS SELECT value AS renamed_value FROM public_people');
+  harness.document.updateData(db.export());
+  db.close();
+
+  const direct = await invokeJson(harness.tools.query, {
+    query: 'SELECT value FROM public_people ORDER BY value',
+    queryName: 'persisted sensitive view',
+    queryDescription: 'Read a persisted view that renames a sensitive column',
+  });
+  const nested = await invokeJson(harness.tools.query, {
+    query: 'SELECT renamed_value FROM nested_people ORDER BY renamed_value',
+    queryName: 'nested sensitive view',
+    queryDescription: 'Read a nested persisted view that renames a sensitive column',
+  });
+
+  assert.deepEqual(direct.rows, [{ value: '[REDACTED]' }, { value: '[REDACTED]' }]);
+  assert.deepEqual(nested.rows, [
+    { renamed_value: '[REDACTED]' },
+    { renamed_value: '[REDACTED]' },
+  ]);
+});
+
 test('query tool does not treat sensitive words inside string literals as column references', async () => {
   const harness = createToolHarness({ sensitiveColumnPatterns: ['name'] });
   const result = await invokeJson(harness.tools.query, {

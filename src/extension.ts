@@ -2,6 +2,16 @@ import * as vscode from 'vscode';
 
 import { applySnapshotDocumentChange } from './custom-document-history';
 import type { SnapshotChangeEvent } from './custom-document-history';
+import {
+  createDatabaseSaveFailedMessage,
+  createDatabaseSavedMessage,
+} from './custom-editor-protocol';
+import type {
+  ExtensionMessage,
+  SaveBinaryMessage,
+  SaveTextMessage,
+  WebviewMessage,
+} from './custom-editor-protocol';
 import { readEditorSettings } from './editor-settings';
 import type { EditorSettings } from './editor-settings';
 import { SqliteDocument } from './sqlite-document';
@@ -157,9 +167,9 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
           try {
             await vscode.commands.executeCommand('workbench.action.files.save');
           } catch (error) {
-            const message = getErrorMessage(error);
-            await webview.postMessage({ type: 'databaseSaveFailed', message });
-            await vscode.window.showErrorMessage(message);
+            const failure = createDatabaseSaveFailedMessage(error);
+            await webview.postMessage(failure);
+            await vscode.window.showErrorMessage(failure.message);
           }
           break;
         case 'error':
@@ -198,10 +208,9 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     const savedData = document.getData();
     await vscode.workspace.fs.writeFile(document.uri, savedData);
     document.markSaved(savedData);
-    await this.postToDocumentPanels(document, {
-      type: 'databaseSaved',
+    await this.postToDocumentPanels(document, createDatabaseSavedMessage({
       dirty: document.isDirty(),
-    });
+    }));
   }
 
   async saveCustomDocumentAs(
@@ -215,10 +224,9 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
     const savedData = document.getData();
     await vscode.workspace.fs.writeFile(destination, savedData);
     document.markSaved(savedData);
-    await this.postToDocumentPanels(document, {
-      type: 'databaseSaved',
+    await this.postToDocumentPanels(document, createDatabaseSavedMessage({
       dirty: document.isDirty(),
-    });
+    }));
   }
 
   async revertCustomDocument(document: SqliteDocument): Promise<void> {
@@ -434,53 +442,13 @@ function escapeAttribute(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-type WebviewMessage =
-  | { type: 'ready' }
-  | { type: 'databaseChanged'; data: ArrayBuffer; label?: string }
-  | { type: 'copilotSelectionChanged'; context: SqliteSelectionUpdate }
-  | { type: 'requestSave' }
-  | { type: 'error'; message: string }
-  | { type: 'clipboardWrite'; text: string }
-  | { type: 'clipboardRead'; requestId: string }
-  | { type: 'undo' }
-  | { type: 'redo' }
-  | SaveTextMessage
-  | SaveBinaryMessage;
-
-type ExtensionMessage =
-  | { type: 'loadDatabase'; name: string; data: ArrayBuffer; settings: EditorSettings; dirty: boolean; resetViewState: boolean }
-  | { type: 'loadError'; message: string; settings: EditorSettings }
-  | { type: 'settingsChanged'; settings: EditorSettings }
-  | { type: 'databaseSaved'; dirty: boolean }
-  | { type: 'databaseSaveFailed'; message: string }
-  | { type: 'documentStateChanged'; dirty: boolean }
-  | { type: 'clipboardText'; requestId: string; text: string };
-
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(data.byteLength);
   copy.set(data);
   return copy.buffer;
 }
 
-type SaveTextMessage = {
-  type: 'saveText';
-  kind: 'csv' | 'sql';
-  fileName: string;
-  content: string;
-};
-
-type SaveBinaryMessage = {
-  type: 'saveBinary';
-  kind: 'blob';
-  fileName: string;
-  content: ArrayBuffer;
-};
-
 function dirname(path: string): string {
   const index = path.lastIndexOf('/');
   return index <= 0 ? '/' : path.slice(0, index);
-}
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

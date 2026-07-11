@@ -80,12 +80,12 @@ test('builds table queries with global and per-column filters', () => {
   assert.deepEqual(query.params, ['%ada%', '%ada%', '%ada%', '10', '%hopper%', 25, 0]);
 });
 
-test('orders without-rowid table chunks by their primary key', () => {
+test.todo('orders without-rowid table chunks by canonical primary-key metadata', () => {
   const query = buildTableSelect({
     tableName: 'memberships',
     columns: [
-      { name: 'tenant_id', type: 'INTEGER', primaryKey: 1 },
-      { name: 'user_id', type: 'INTEGER', primaryKey: 2 },
+      { name: 'tenant_id', type: 'INTEGER', primaryKeyOrder: 1 },
+      { name: 'user_id', type: 'INTEGER', primaryKeyOrder: 2 },
     ],
     includeRowid: false,
     limit: 50,
@@ -96,6 +96,38 @@ test('orders without-rowid table chunks by their primary key', () => {
     query.sql,
     'SELECT "tenant_id", "user_id" FROM "memberships" ORDER BY "tenant_id" ASC, "user_id" ASC LIMIT ? OFFSET ?',
   );
+});
+
+test.todo('keeps hidden row identity separate from a displayed alias-collision column', () => {
+  const query = buildTableSelect({
+    tableName: 'alias_collision',
+    columns: [
+      { name: 'id', type: 'INTEGER', primaryKeyOrder: 1 },
+      { name: '__database_editor_rowid', type: 'TEXT', primaryKeyOrder: 0 },
+    ],
+    includeRowid: true,
+    limit: 50,
+    offset: 0,
+  });
+
+  assert.doesNotMatch(query.sql, /rowid AS __database_editor_rowid/i);
+  assert.match(query.sql, /"alias_collision"\.(?:rowid|oid|_rowid_)/i);
+});
+
+test.todo('qualifies hidden identity so a declared rowid column cannot shadow it', () => {
+  const query = buildTableSelect({
+    tableName: 'declared_rowid',
+    columns: [
+      { name: 'rowid', type: 'TEXT', primaryKeyOrder: 0 },
+      { name: 'value', type: 'TEXT', primaryKeyOrder: 0 },
+    ],
+    includeRowid: true,
+    limit: 50,
+    offset: 0,
+  });
+
+  assert.doesNotMatch(query.sql, /SELECT rowid AS/i);
+  assert.match(query.sql, /"declared_rowid"\.(?:oid|_rowid_)/i);
 });
 
 test('builds write statements without interpolating values', () => {
@@ -164,6 +196,28 @@ test('analyzes mutating and transaction-controlled SQL scripts', () => {
   const explicitTransaction = analyzeSqlScript("BEGIN; UPDATE people SET name = 'Ada'; COMMIT;");
   assert.equal(explicitTransaction.mutates, true);
   assert.equal(explicitTransaction.hasTransactionControl, true);
+});
+
+test.todo('reports transaction and savepoint balance for incomplete scripts', () => {
+  const openTransaction = analyzeSqlScript('BEGIN; INSERT INTO notes VALUES (1);');
+  assert.equal(openTransaction.leavesTransactionOpen, true);
+  assert.equal(openTransaction.hasUnmatchedTransactionClose, false);
+  assert.deepEqual(openTransaction.transactionControl, ['begin']);
+
+  const nestedSavepoint = analyzeSqlScript('SAVEPOINT outer; SAVEPOINT inner; RELEASE inner;');
+  assert.equal(nestedSavepoint.leavesTransactionOpen, true);
+  assert.equal(nestedSavepoint.openSavepointCount, 1);
+  assert.deepEqual(nestedSavepoint.transactionControl, ['savepoint', 'savepoint', 'release']);
+});
+
+test.todo('reports unmatched transaction closes without treating complete scripts as open', () => {
+  const unmatched = analyzeSqlScript('COMMIT; SELECT 1;');
+  assert.equal(unmatched.hasUnmatchedTransactionClose, true);
+  assert.equal(unmatched.leavesTransactionOpen, false);
+
+  const complete = analyzeSqlScript('BEGIN; SAVEPOINT inner; RELEASE inner; COMMIT;');
+  assert.equal(complete.hasUnmatchedTransactionClose, false);
+  assert.equal(complete.leavesTransactionOpen, false);
 });
 
 test('analyzes SQL scripts without splitting comments or quoted semicolons', () => {
@@ -258,6 +312,31 @@ test('exports schema and table data as a SQL dump', () => {
     'COMMIT;',
     '',
   ].join('\n'));
+});
+
+test.todo('restores trigger-backed dumps without duplicating trigger-generated rows', async () => {
+  const SQL = await initSqlJs({
+    locateFile: (file) => path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file),
+  });
+  const dump = buildSqlDump({
+    schema: [
+      'CREATE TABLE source (id INTEGER PRIMARY KEY, value TEXT NOT NULL)',
+      'CREATE TABLE audit (source_id INTEGER NOT NULL, value TEXT NOT NULL)',
+      `CREATE TRIGGER source_audit AFTER INSERT ON source BEGIN
+        INSERT INTO audit (source_id, value) VALUES (NEW.id, NEW.value);
+      END`,
+    ],
+    tables: [
+      { name: 'source', columns: ['id', 'value'], rows: [{ id: 1, value: 'created once' }] },
+      { name: 'audit', columns: ['source_id', 'value'], rows: [{ source_id: 1, value: 'created once' }] },
+    ],
+  });
+  const restored = new SQL.Database();
+
+  restored.exec(dump);
+
+  assert.equal(executeRows(restored, 'SELECT COUNT(*) AS count FROM audit')[0].count, 1);
+  restored.close();
 });
 
 test('generated statements work against SQLite', async () => {

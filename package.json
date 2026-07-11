@@ -602,8 +602,8 @@
     "validate:local": "pnpm run vendor:sqljs:check && pnpm test && pnpm run fixture:sqlite && pnpm run vsce:package",
     "website:dev": "wrangler dev --config wrangler.toml",
     "website:deploy": "wrangler deploy --config wrangler.toml",
-    "vscode:prepublish": "pnpm run package && pnpm run vsce:package",
-    "prepublish": "pnpm run version && vscode:prepublish"
+    "vscode:prepublish": "pnpm run package",
+    "prepublish": "pnpm run version"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",
