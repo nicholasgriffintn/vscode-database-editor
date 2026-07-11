@@ -138,8 +138,10 @@ test('cloneData returns an independent Uint8Array copy', () => {
 test('oversized snapshot changes fall back to content changes without retaining undo snapshots', async () => {
   const events = [];
   const posted = [];
+  const cloneLog = [];
+  const before = new Uint8Array([1, 2, 3]);
   const document = {
-    data: new Uint8Array([1, 2, 3]),
+    data: before,
     getData() {
       return this.data;
     },
@@ -155,6 +157,10 @@ test('oversized snapshot changes fall back to content changes without retaining 
     emitEdit: (event) => events.push(event),
     postSnapshot: (data) => posted.push([...data]),
     maxUndoMemoryBytes: 6,
+    cloneData: (data) => {
+      cloneLog.push(data === before ? 'before' : 'after');
+      return new Uint8Array(data);
+    },
   });
 
   assert.deepEqual([...document.getData()], [4, 5, 6, 7]);
@@ -162,6 +168,37 @@ test('oversized snapshot changes fall back to content changes without retaining 
   assert.equal(events[0].document, document);
   assert.equal(typeof events[0].undo, 'undefined');
   assert.deepEqual(posted, []);
+  // Over-budget path should copy only incoming bytes once and never clone the existing document bytes.
+  assert.deepEqual(cloneLog, ['after']);
+});
+
+test('in-budget snapshot updates keep exactly one clone of current and incoming bytes', async () => {
+  const cloneLog = [];
+  const document = {
+    data: new Uint8Array([1, 2]),
+    getData() {
+      return this.data;
+    },
+    updateData(data) {
+      this.data = data;
+    },
+  };
+
+  await applySnapshotDocumentChange({
+    document,
+    data: new Uint8Array([3, 4]),
+    label: 'Small edit',
+    emitEdit: () => {},
+    postSnapshot: () => {},
+    maxUndoMemoryBytes: 20,
+    cloneData: (data) => {
+      cloneLog.push(data === document.data ? 'before' : 'incoming');
+      return new Uint8Array(data);
+    },
+  });
+
+  // Keep-undo path should clone exactly these two buffers before update: one for current state and one for incoming data.
+  assert.deepEqual(cloneLog, ['before', 'incoming']);
 });
 
 function createRevisionedDocument(values, revision = 0) {

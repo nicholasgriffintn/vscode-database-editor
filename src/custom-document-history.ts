@@ -26,12 +26,21 @@ export type SnapshotApplyResult =
   | { accepted: true; revision: number }
   | { accepted: false; currentRevision: number };
 
+export type CloneData = (data: Uint8Array) => Uint8Array;
+
 export function cloneData(data: Uint8Array): Uint8Array {
   const copy = new Uint8Array(data.byteLength);
   copy.set(data);
   return copy;
 }
 
+/**
+ * Peak copy expectations:
+ * - Over-budget path clones only the incoming payload once, then applies it directly and
+ *   emits a content-change event.
+ * - In-budget path clones current bytes once and incoming bytes once before updating the
+ *   document, then stores both immutable snapshots for undo/redo.
+ */
 export async function applySnapshotDocumentChange<T extends SnapshotDocument>({
   document,
   data,
@@ -41,6 +50,7 @@ export async function applySnapshotDocumentChange<T extends SnapshotDocument>({
   postAfterApply = false,
   maxUndoMemoryBytes = Number.POSITIVE_INFINITY,
   expectedRevision,
+  cloneData: cloneBytes = cloneData,
 }: {
   document: T;
   data: Uint8Array;
@@ -50,6 +60,7 @@ export async function applySnapshotDocumentChange<T extends SnapshotDocument>({
   postAfterApply?: boolean;
   maxUndoMemoryBytes?: number;
   expectedRevision?: number;
+  cloneData?: CloneData;
 }): Promise<SnapshotApplyResult> {
   return enqueue(document, async () => {
     const currentRevision = getRevision(document);
@@ -57,27 +68,46 @@ export async function applySnapshotDocumentChange<T extends SnapshotDocument>({
       return { accepted: false, currentRevision };
     }
 
-    const before = cloneData(document.getData());
-    const after = cloneData(data);
-    document.updateData(cloneData(after));
-    const revision = getRevision(document);
+    const before = document.getData();
+    const keepUndoSnapshots = shouldKeepUndoSnapshots(before.byteLength, data.byteLength, maxUndoMemoryBytes);
+    let postedData: Uint8Array;
 
-    if (shouldKeepUndoSnapshots(before, after, maxUndoMemoryBytes)) {
-      emitEdit(createSnapshotEditEvent({ document, before, after, label, postSnapshot }));
+    if (keepUndoSnapshots) {
+      const beforeSnapshot = cloneBytes(before);
+      const afterSnapshot = cloneBytes(data);
+      document.updateData(afterSnapshot);
+      postedData = afterSnapshot;
+
+      emitEdit(
+        createSnapshotEditEvent({
+          document,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+          label,
+          postSnapshot,
+          cloneData: cloneBytes,
+          cloneInputs: false,
+        }),
+      );
     } else {
+      const replacement = cloneBytes(data);
+      document.updateData(replacement);
+      postedData = replacement;
       emitEdit({ document });
     }
 
+    const revision = getRevision(document);
+
     if (postAfterApply) {
-      await postBestEffort(postSnapshot, after);
+      await postBestEffort(postSnapshot, postedData);
     }
     return { accepted: true, revision };
   });
 }
 
-function shouldKeepUndoSnapshots(before: Uint8Array, after: Uint8Array, maxUndoMemoryBytes: number): boolean {
+function shouldKeepUndoSnapshots(currentLength: number, nextLength: number, maxUndoMemoryBytes: number): boolean {
   const budget = Number(maxUndoMemoryBytes);
-  return !Number.isFinite(budget) || budget <= 0 || before.byteLength + after.byteLength <= budget;
+  return !Number.isFinite(budget) || budget <= 0 || currentLength + nextLength <= budget;
 }
 
 export function createSnapshotEditEvent<T extends SnapshotDocument>({
@@ -86,19 +116,23 @@ export function createSnapshotEditEvent<T extends SnapshotDocument>({
   after,
   label,
   postSnapshot,
+  cloneData: cloneBytes = cloneData,
+  cloneInputs = true,
 }: {
   document: T;
   before: Uint8Array;
   after: Uint8Array;
   label?: string;
   postSnapshot: SnapshotPost;
+  cloneData?: CloneData;
+  cloneInputs?: boolean;
 }): SnapshotEditEvent<T> {
-  const beforeSnapshot = cloneData(before);
-  const afterSnapshot = cloneData(after);
+  const beforeSnapshot = cloneInputs ? cloneBytes(before) : before;
+  const afterSnapshot = cloneInputs ? cloneBytes(after) : after;
 
   async function apply(snapshot: Uint8Array): Promise<void> {
     await enqueue(document, async () => {
-      const nextData = cloneData(snapshot);
+      const nextData = cloneBytes(snapshot);
       document.updateData(nextData);
       await postBestEffort(postSnapshot, nextData);
     });
@@ -124,8 +158,12 @@ function enqueue<T>(document: SnapshotDocument, operation: () => PromiseLike<T> 
 
 async function postBestEffort(postSnapshot: SnapshotPost, data: Uint8Array): Promise<void> {
   try {
-    await postSnapshot(cloneData(data));
+    await postSnapshot(data);
   } catch {
     // Panels can be disposed while a queued authoritative mutation is completing.
   }
+}
+
+function cloneBytes(data: Uint8Array): Uint8Array {
+  return cloneData(data);
 }
