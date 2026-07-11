@@ -8,6 +8,14 @@ import {
 } from './editor-settings.mjs';
 import { createElement, clear } from './dom-utils.mjs';
 import {
+  createConfirmationModel,
+  createDiscardDraftModel,
+  getDestructiveSqlConfirmationDetails,
+  requiresDestructiveSqlConfirmation,
+  runDialogMutation,
+  showConfirmation,
+} from './dialog-workflows.mjs';
+import {
   describeBlob,
   detectBlobMediaType,
   getBlobFileExtension,
@@ -19,7 +27,6 @@ import {
   getCellInteraction,
   getCellClipboardText,
   getCopilotSelectionContext,
-  getDeleteRowsConfirmationMessage,
   getGridColumnStyle,
   getObjectItemInteraction,
   getInfiniteRowWindow,
@@ -2156,7 +2163,7 @@ function syncRenderedSelectionState() {
 async function smartDeleteSelection() {
   const selectedRows = getVisibleSelectedRows();
   if (selectedRows.length > 0) {
-    await deleteRows(selectedRows, { confirm: true });
+    await deleteRows(selectedRows, { invoker: document.activeElement });
     return;
   }
 
@@ -2169,14 +2176,22 @@ async function smartDeleteSelection() {
     const row = visibleRows[selectedCell.rowIndex];
     const column = table.columns.find((candidate) => candidate.name === selectedCell.columnName);
     if (row && column && column.canUpdate !== false && !column.readOnly && !(row.values[column.name] instanceof Uint8Array)) {
-      await updateCell(table, row, column, null, row.values[column.name]);
-      elements.status.textContent = `Cleared ${column.name}${buildAutoCommitStatusSuffix()}`;
+      const confirmed = await confirmDestructiveAction(createConfirmationModel({
+        kind: 'cell',
+        tableName: table.name,
+        columnName: column.name,
+        rowNumber: getVisibleRowOffset() + selectedCell.rowIndex + 1,
+      }), document.activeElement);
+      if (confirmed) {
+        await updateCell(table, row, column, null, row.values[column.name]);
+        elements.status.textContent = `Cleared ${column.name}${buildAutoCommitStatusSuffix()}`;
+      }
     }
     return;
   }
 
   if (selectedRow !== null) {
-    await deleteRows([visibleRows[selectedRow]].filter(Boolean), { confirm: true });
+    await deleteRows([visibleRows[selectedRow]].filter(Boolean), { invoker: document.activeElement });
   }
 }
 
@@ -2442,10 +2457,10 @@ async function runAction(action, sourceElement = null) {
       showRowDetails(Number(sourceElement?.dataset.actionRow));
       break;
     case 'delete-row':
-      await deleteRowAt(Number(sourceElement?.dataset.actionRow));
+      await deleteRowAt(Number(sourceElement?.dataset.actionRow), sourceElement);
       break;
     case 'delete-selected-rows':
-      await deleteSelectedRows();
+      await deleteSelectedRows(sourceElement);
       break;
     case 'add-row':
       showInsertDialog();
@@ -2488,7 +2503,7 @@ async function runAction(action, sourceElement = null) {
       showDropColumnDialog();
       break;
     case 'drop-table':
-      await dropActiveTable();
+      await dropActiveTable(sourceElement);
       break;
   }
 }
@@ -2580,6 +2595,7 @@ function showInlineCellEditor(rowIndex, columnName) {
 }
 
 function showRowDetails(rowIndex, initialColumnName = null) {
+  const invoker = document.activeElement;
   const table = getActiveTable();
   if (!table || table.type !== 'table' || Number.isNaN(rowIndex)) {
     return;
@@ -2720,15 +2736,42 @@ function showRowDetails(rowIndex, initialColumnName = null) {
   dialog.append(form);
   document.body.append(dialog);
 
-  previous.addEventListener('click', () => {
+  let hasDirtyDraft = false;
+  const updateDirtyState = () => {
+    hasDirtyDraft = updateRowDialogState({ table, row, form, validationSummary, save }).dirty;
+  };
+  const closeOrNavigate = async ({ destination, nextRowIndex = null, invoker = null }) => {
+    if (hasDirtyDraft) {
+      const confirmed = await confirmDestructiveAction(createDiscardDraftModel({
+        tableName: table.name,
+        rowNumber: absoluteRowNumber,
+        destination,
+      }), invoker);
+      if (!confirmed) {
+        return false;
+      }
+    }
     dialog.close();
-    showRowDetails(rowIndex - 1, initialColumnName);
+    if (nextRowIndex !== null) {
+      showRowDetails(nextRowIndex, initialColumnName);
+    }
+    return true;
+  };
+
+  previous.addEventListener('click', () => {
+    void closeOrNavigate({
+      destination: `moving to row ${absoluteRowNumber - 1}`,
+      nextRowIndex: rowIndex - 1,
+      invoker: previous,
+    });
   });
   next.addEventListener('click', () => {
-    dialog.close();
-    showRowDetails(rowIndex + 1, initialColumnName);
+    void closeOrNavigate({
+      destination: `moving to row ${absoluteRowNumber + 1}`,
+      nextRowIndex: rowIndex + 1,
+      invoker: next,
+    });
   });
-  const updateDirtyState = () => updateRowDialogState({ table, row, form, validationSummary, save });
   fields.addEventListener('input', updateDirtyState);
   fields.addEventListener('change', updateDirtyState);
   fields.addEventListener('click', (event) => {
@@ -2742,18 +2785,33 @@ function showRowDetails(rowIndex, initialColumnName = null) {
   });
   updateDirtyState();
 
-  cancel.addEventListener('click', () => dialog.close());
+  cancel.addEventListener('click', () => {
+    void closeOrNavigate({ destination: 'closing this dialog', invoker: cancel });
+  });
   remove.addEventListener('click', async () => {
-    if (window.confirm(`Delete row ${rowIndex + 1}?`)) {
-      await deleteRowAt(rowIndex);
+    const result = await deleteRowAt(rowIndex, remove);
+    if (result.deleted) {
       dialog.close();
+    } else if (result.error) {
+      renderDialogMutationError(validationSummary, result.error);
     }
+  });
+  dialog.addEventListener('cancel', (event) => {
+    if (!hasDirtyDraft) {
+      return;
+    }
+    event.preventDefault();
+    void closeOrNavigate({ destination: 'closing this dialog', invoker: cancel });
   });
   dialog.addEventListener('close', () => {
     for (const url of blobPreviewUrls) {
       URL.revokeObjectURL(url);
     }
     dialog.remove();
+    const focusTarget = invoker?.isConnected
+      ? invoker
+      : elements.grid.querySelector(`[data-row="${CSS.escape(String(Math.min(rowIndex, visibleRows.length - 1)))}"] button`);
+    focusTarget?.focus?.();
   });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2838,6 +2896,7 @@ function updateRowDialogState({ table, row, form, validationSummary, save }) {
   const errors = getRowValidationErrors(validationFields);
   renderValidationSummary(validationSummary, errors);
   save.disabled = errors.length > 0 || !hasDirtyFields;
+  return { dirty: hasDirtyFields, errors };
 }
 
 function resetRowField({ form, row, columnName }) {
@@ -2867,6 +2926,14 @@ function renderValidationSummary(validationSummary, errors) {
     createElement('ul', {
       children: errors.map((error) => createElement('li', { text: error })),
     }),
+  );
+}
+
+function renderDialogMutationError(errorRegion, message) {
+  errorRegion.classList.remove('hidden');
+  errorRegion.replaceChildren(
+    createElement('strong', { text: 'The change could not be saved:' }),
+    createElement('div', { text: message }),
   );
 }
 
@@ -2972,7 +3039,9 @@ async function saveRowDetails(table, row, form, validationSummary) {
     await refreshRows();
     return { saved: true };
   } catch (error) {
-    reportError(error);
+    const message = getErrorMessage(error);
+    renderDialogMutationError(validationSummary, message);
+    elements.status.textContent = message;
     return { saved: false };
   }
 }
@@ -2997,73 +3066,49 @@ async function updateCell(table, row, column, input, previousValue) {
   }
 }
 
-async function deleteRowAt(rowIndex) {
+async function deleteRowAt(rowIndex, invoker = null) {
+  const table = getEditableTable();
   const row = visibleRows[rowIndex];
-  if (!row) {
-    return;
+  if (!table || !row) {
+    return { deleted: false };
   }
-  await deleteRows([row], { confirm: false });
-}
-
-async function deleteSelectedRows() {
-  await deleteRows(getVisibleSelectedRows(), { confirm: true });
-}
-
-function confirmDeleteRows(count) {
-  return new Promise((resolve) => {
-    const message = getDeleteRowsConfirmationMessage(count);
-    const dialog = createElement('dialog', { className: 'insert-dialog confirm-dialog' });
-    const cancel = createElement('button', {
-      className: 'toolbar-button',
-      text: 'Cancel',
-      attributes: { type: 'button' },
-    });
-    const remove = createElement('button', {
-      className: 'toolbar-button danger',
-      text: count === 1 ? 'Delete row' : `Delete ${count.toLocaleString()} rows`,
-      attributes: { type: 'button' },
-    });
-    const form = createElement('form', { attributes: { method: 'dialog' } });
-    form.append(
-      createElement('h2', { text: 'Delete selected rows' }),
-      createElement('p', { className: 'confirm-message', text: message }),
-      createElement('div', { className: 'dialog-actions', children: [cancel, remove] }),
-    );
-    dialog.append(form);
-    document.body.append(dialog);
-
-    let resolved = false;
-    function finish(value) {
-      if (resolved) {
-        return;
-      }
-      resolved = true;
-      resolve(value);
-      dialog.close();
-    }
-
-    cancel.addEventListener('click', () => finish(false));
-    remove.addEventListener('click', () => finish(true));
-    dialog.addEventListener('close', () => {
-      if (!resolved) {
-        resolved = true;
-        resolve(false);
-      }
-      dialog.remove();
-    });
-    dialog.showModal();
-    cancel.focus();
+  return deleteRows([row], {
+    invoker,
+    model: createConfirmationModel({
+      kind: 'row',
+      tableName: table.name,
+      rowNumber: getVisibleRowOffset() + rowIndex + 1,
+    }),
   });
 }
 
-async function deleteRows(rows, { confirm = true } = {}) {
+async function deleteSelectedRows(invoker = null) {
+  return deleteRows(getVisibleSelectedRows(), { invoker });
+}
+
+function confirmDestructiveAction(model, invoker = document.activeElement) {
+  return showConfirmation({
+    model,
+    invoker,
+    fallbackFocus: () => elements.grid.querySelector('[data-row], [data-action]') ?? elements.dataRefresh,
+  });
+}
+
+async function deleteRows(rows, { invoker = null, model = null } = {}) {
   const table = getActiveTable();
   if (!table || table.type === 'view' || rows.length === 0) {
     return { deleted: false };
   }
 
   const count = rows.length;
-  if (confirm && !(await confirmDeleteRows(count))) {
+  const singleRowIndex = count === 1 ? visibleRows.indexOf(rows[0]) : -1;
+  const confirmation = model ?? createConfirmationModel({
+    kind: count === 1 ? 'row' : 'rows',
+    tableName: table.name,
+    rowNumber: singleRowIndex >= 0 ? getVisibleRowOffset() + singleRowIndex + 1 : 1,
+    count,
+  });
+  if (!(await confirmDestructiveAction(confirmation, invoker))) {
     return { deleted: false };
   }
 
@@ -3085,12 +3130,14 @@ async function deleteRows(rows, { confirm = true } = {}) {
     elements.status.textContent = `Deleted ${count.toLocaleString()} ${count === 1 ? 'row' : 'rows'}`;
     return { deleted: true };
   } catch (error) {
+    const message = getErrorMessage(error);
     reportError(error);
-    return { deleted: false };
+    return { deleted: false, error: message };
   }
 }
 
 function showInsertDialog() {
+  const invoker = document.activeElement;
   const table = getActiveTable();
   if (!table || table.type === 'view') {
     return;
@@ -3138,18 +3185,36 @@ function showInsertDialog() {
     text: 'Insert',
     attributes: { type: 'submit' },
   });
-  form.append(createElement('div', { className: 'dialog-actions', children: [cancel, submit] }));
+  const errorRegion = createElement('div', {
+    className: 'validation-summary hidden',
+    attributes: { role: 'alert' },
+  });
+  form.append(
+    errorRegion,
+    createElement('div', { className: 'dialog-actions', children: [cancel, submit] }),
+  );
   dialog.append(form);
   document.body.append(dialog);
 
   cancel.addEventListener('click', () => dialog.close());
-  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('close', () => {
+    dialog.remove();
+    const focusTarget = invoker?.isConnected ? invoker : elements.addRow;
+    focusTarget?.focus?.();
+  });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    await insertRow(table, form);
-    dialog.close();
+    const result = await runDialogMutation({
+      submitButton: submit,
+      errorRegion,
+      operation: () => insertRow(table, form),
+    });
+    if (result.ok) {
+      dialog.close();
+    }
   });
   dialog.showModal();
+  form.querySelector('input:not([type="checkbox"]), select, textarea')?.focus();
 }
 
 async function insertRow(table, form) {
@@ -3169,8 +3234,11 @@ async function insertRow(table, form) {
     runWrite(db, insertion.sql, insertion.params, { expectedRowsModified: 1 });
     markChanged();
     await refreshTables();
+    return { ok: true };
   } catch (error) {
-    reportError(error);
+    const message = getErrorMessage(error);
+    elements.status.textContent = message;
+    return { ok: false, error: message };
   }
 }
 
@@ -3185,18 +3253,15 @@ function showCreateTableDialog() {
       { name: 'primaryKey', label: 'Primary key', type: 'checkbox', checked: true },
       { name: 'notNull', label: 'Not null', type: 'checkbox' },
     ],
-    onSubmit: async (values) => {
-      activeTableName = values.tableName.trim();
-      await applySchemaChange(buildCreateTable({
-        tableName: values.tableName,
-        columns: [{
-          name: values.columnName,
-          type: values.type,
-          primaryKey: values.primaryKey,
-          notNull: values.notNull,
-        }],
-      }));
-    },
+    onSubmit: async (values) => applySchemaChange(buildCreateTable({
+      tableName: values.tableName,
+      columns: [{
+        name: values.columnName,
+        type: values.type,
+        primaryKey: values.primaryKey,
+        notNull: values.notNull,
+      }],
+    }), { nextActiveTableName: values.tableName.trim() }),
   });
 }
 
@@ -3212,10 +3277,10 @@ function showRenameTableDialog() {
     fields: [
       { name: 'newName', label: 'New table name', value: table.name, required: true },
     ],
-    onSubmit: async (values) => {
-      activeTableName = values.newName.trim();
-      await applySchemaChange(buildRenameTable({ oldName: table.name, newName: values.newName }));
-    },
+    onSubmit: async (values) => applySchemaChange(
+      buildRenameTable({ oldName: table.name, newName: values.newName }),
+      { nextActiveTableName: values.newName.trim() },
+    ),
   });
 }
 
@@ -3235,18 +3300,16 @@ function showAddColumnDialog() {
       { name: 'notNull', label: 'Not null', type: 'checkbox' },
       { name: 'unique', label: 'Unique', type: 'checkbox' },
     ],
-    onSubmit: async (values) => {
-      await applySchemaChange(buildAddColumn({
-        tableName: table.name,
-        column: {
-          name: values.columnName,
-          type: values.type,
-          defaultValue: values.defaultValue,
-          notNull: values.notNull,
-          unique: values.unique,
-        },
-      }));
-    },
+    onSubmit: async (values) => applySchemaChange(buildAddColumn({
+      tableName: table.name,
+      column: {
+        name: values.columnName,
+        type: values.type,
+        defaultValue: values.defaultValue,
+        notNull: values.notNull,
+        unique: values.unique,
+      },
+    })),
   });
 }
 
@@ -3269,32 +3332,50 @@ function showDropColumnDialog() {
       },
     ],
     onSubmit: async (values) => {
-      await applySchemaChange(buildDropColumn({ tableName: table.name, columnName: values.columnName }));
+      const confirmed = await confirmDestructiveAction(createConfirmationModel({
+        kind: 'column',
+        tableName: table.name,
+        columnName: values.columnName,
+      }), document.activeElement);
+      if (!confirmed) {
+        return { ok: false, error: '' };
+      }
+      return applySchemaChange(buildDropColumn({ tableName: table.name, columnName: values.columnName }));
     },
   });
 }
 
-async function dropActiveTable() {
+async function dropActiveTable(invoker = null) {
   const table = getEditableTable();
-  if (!table || !window.confirm(`Drop table "${table.name}"? This cannot be undone after saving.`)) {
-    return;
+  if (!table) {
+    return { ok: false };
   }
-
-  activeTableName = null;
-  await applySchemaChange(buildDropTable({ tableName: table.name }));
+  const confirmed = await confirmDestructiveAction(createConfirmationModel({
+    kind: 'table',
+    tableName: table.name,
+  }), invoker);
+  if (!confirmed) {
+    return { ok: false };
+  }
+  return applySchemaChange(buildDropTable({ tableName: table.name }), { nextActiveTableName: null });
 }
 
-async function applySchemaChange(sql) {
+async function applySchemaChange(sql, { nextActiveTableName = activeTableName } = {}) {
   try {
     runWrite(db, sql);
+    activeTableName = nextActiveTableName;
     markChanged();
     await refreshTables();
+    return { ok: true };
   } catch (error) {
-    reportError(error);
+    const message = getErrorMessage(error);
+    elements.status.textContent = message;
+    return { ok: false, error: message };
   }
 }
 
 function showSchemaDialog({ title, submitText, fields, onSubmit }) {
+  const invoker = document.activeElement;
   const dialog = createElement('dialog', { className: 'insert-dialog schema-dialog' });
   const form = createElement('form', { attributes: { method: 'dialog' } });
   const fieldList = createElement('div', { className: 'insert-fields' });
@@ -3313,22 +3394,38 @@ function showSchemaDialog({ title, submitText, fields, onSubmit }) {
     text: submitText,
     attributes: { type: 'submit' },
   });
+  const errorRegion = createElement('div', {
+    className: 'validation-summary hidden',
+    attributes: { role: 'alert' },
+  });
   form.append(
     createElement('h2', { text: title }),
     fieldList,
+    errorRegion,
     createElement('div', { className: 'dialog-actions', children: [cancel, submit] }),
   );
   dialog.append(form);
   document.body.append(dialog);
 
   cancel.addEventListener('click', () => dialog.close());
-  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('close', () => {
+    dialog.remove();
+    const focusTarget = invoker?.isConnected ? invoker : elements.schemaDdlButton;
+    focusTarget?.focus?.();
+  });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    await onSubmit(readSchemaForm(form, fields));
-    dialog.close();
+    const result = await runDialogMutation({
+      submitButton: submit,
+      errorRegion,
+      operation: () => onSubmit(readSchemaForm(form, fields)),
+    });
+    if (result.ok) {
+      dialog.close();
+    }
   });
   dialog.showModal();
+  form.querySelector('input:not([type="checkbox"]), select, textarea')?.focus();
 }
 
 function createSchemaField(field) {
@@ -3445,6 +3542,21 @@ async function runSqlWorkspace() {
   if (analysis.isEmpty) {
     setQueryMessage('Enter a SQL statement to run.', 'warning');
     return;
+  }
+
+  if (requiresDestructiveSqlConfirmation(analysis)) {
+    const details = getDestructiveSqlConfirmationDetails(analysis) ?? {
+      action: 'destructive SQL',
+      target: 'the identified SQL target',
+    };
+    const confirmed = await confirmDestructiveAction(createConfirmationModel({
+      kind: 'sql',
+      ...details,
+    }), document.activeElement);
+    if (!confirmed) {
+      setQueryMessage('Destructive SQL was not run.', 'warning');
+      return;
+    }
   }
 
   recordQueryHistory(querySql);

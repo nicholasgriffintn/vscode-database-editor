@@ -208,7 +208,7 @@ test('row actions are per-row and table-only', () => {
   assert.deepEqual(getRowActions({ tableType: 'view', rowIndex: 2 }), []);
 });
 
-test.todo('failed insert and schema submissions retain dialog input and active-table state', async () => {
+test('failed insert and schema submissions retain dialog input and active-table state', async () => {
   const source = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
 
   assert.doesNotMatch(
@@ -223,6 +223,18 @@ test.todo('failed insert and schema submissions retain dialog input and active-t
     source,
     /activeTableName = values\.(?:tableName|newName)\.trim\(\);\s*await applySchemaChange/,
   );
+});
+
+test('destructive webview actions use shared confirmations and dirty row dialogs guard dismissal', async () => {
+  const source = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(source, /window\.confirm\(/);
+  assert.match(source, /kind: 'row',[\s\S]{0,160}tableName: table\.name,[\s\S]{0,160}rowNumber:/);
+  assert.match(source, /kind: 'column',[\s\S]{0,160}columnName: values\.columnName/);
+  assert.match(source, /kind: 'table',[\s\S]{0,160}tableName: table\.name/);
+  assert.match(source, /if \(hasDirtyDraft\)[\s\S]{0,240}createDiscardDraftModel/);
+  assert.match(source, /dialog\.addEventListener\('cancel',[\s\S]{0,240}event\.preventDefault\(\)/);
+  assert.match(source, /const result = await deleteRowAt\(rowIndex, remove\);\s*if \(result\.deleted\) \{\s*dialog\.close\(\)/);
 });
 
 test('pager state belongs to the bottom-right grid footer', () => {
