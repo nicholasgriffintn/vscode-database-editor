@@ -25,6 +25,12 @@ test('destructive confirmation models name the exact row, table, column, and cou
   assert.match(createConfirmationModel({ kind: 'cell', tableName: 'people', columnName: 'name', rowNumber: 2 }).message, /“people”\.name.*row 2/);
   assert.match(createConfirmationModel({ kind: 'column', tableName: 'people', columnName: 'legacy' }).message, /“people”\.legacy/);
   assert.match(createConfirmationModel({ kind: 'table', tableName: 'people' }).message, /table “people”/);
+  assert.deepEqual(createConfirmationModel({ kind: 'index', target: 'people_name' }), {
+    title: 'Drop index',
+    message: 'Drop index “people_name”? This cannot be undone after saving.',
+    confirmLabel: 'Drop index',
+    destructive: true,
+  });
   assert.match(createDiscardDraftModel({ tableName: 'people', rowNumber: 3, destination: 'moving to row 4' }).message, /row 3.*“people”.*moving to row 4/);
 });
 

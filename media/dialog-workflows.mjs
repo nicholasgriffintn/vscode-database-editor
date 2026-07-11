@@ -48,6 +48,13 @@ export function createConfirmationModel({
         confirmLabel: 'Drop table',
         destructive: true,
       };
+    case 'index':
+      return {
+        title: 'Drop index',
+        message: `Drop index “${target}”? This cannot be undone after saving.`,
+        confirmLabel: 'Drop index',
+        destructive: true,
+      };
     case 'sql':
       return {
         title: 'Run destructive SQL',

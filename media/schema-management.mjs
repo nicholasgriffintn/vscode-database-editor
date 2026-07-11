@@ -36,6 +36,42 @@ export function buildDropColumn({ tableName, columnName }) {
   return `ALTER TABLE ${quoteIdentifier(requireName(tableName, 'Table name'))} DROP COLUMN ${quoteIdentifier(requireName(columnName, 'Column name'))}`;
 }
 
+export function buildCreateIndex({ indexName, tableName, columns, unique = false }) {
+  const name = requireName(indexName, 'Index name');
+  const table = requireName(tableName, 'Table name');
+  if (!Array.isArray(columns) || columns.length === 0) {
+    throw new Error('At least one index column is required.');
+  }
+
+  const serializedColumns = columns.map((column) => {
+    const normalized = typeof column === 'string' ? { name: column } : column;
+    const columnName = requireName(normalized?.name, 'Index column name');
+    const direction = normalizeSortDirection(normalized?.direction);
+    return `${quoteIdentifier(columnName)}${direction ? ` ${direction}` : ''}`;
+  });
+  return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${quoteIdentifier(name)} ON ${quoteIdentifier(table)} (${serializedColumns.join(', ')})`;
+}
+
+export function buildDropIndex({ indexName }) {
+  const name = requireName(indexName, 'Index name');
+  if (name.toLowerCase().startsWith('sqlite_autoindex_')) {
+    throw new Error('SQLite autoindexes are managed by SQLite and cannot be dropped directly.');
+  }
+  return `DROP INDEX ${quoteIdentifier(name)}`;
+}
+
+export function parseIndexColumnNames(value, direction) {
+  const names = String(value ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+  if (names.length === 0) {
+    throw new Error('At least one index column is required.');
+  }
+  const normalizedDirection = normalizeSortDirection(direction);
+  return names.map((name) => ({ name, direction: normalizedDirection || undefined }));
+}
+
 function serializeColumn(column) {
   const name = requireName(column?.name, 'Column name');
   const parts = [quoteIdentifier(name), normalizeType(column?.type)];
@@ -73,6 +109,17 @@ function normalizeType(value) {
     throw new Error(`Unsupported column type: ${value}`);
   }
   return trimmed;
+}
+
+function normalizeSortDirection(value) {
+  const direction = String(value ?? '').trim().toUpperCase();
+  if (!direction) {
+    return '';
+  }
+  if (direction !== 'ASC' && direction !== 'DESC') {
+    throw new Error(`Unsupported index sort direction: ${value}`);
+  }
+  return direction;
 }
 
 function serializeDefault(value) {

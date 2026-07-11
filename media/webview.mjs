@@ -83,6 +83,7 @@ import {
   getSchemaGraphEmptyState,
   layoutSchemaGraph,
 } from './schema-graph.mjs';
+import { formatSchemaObjectDdl, resolveSchemaSelection } from './schema-object-ui.mjs';
 import {
   configureDatabase,
   countTableRows,
@@ -109,10 +110,13 @@ import {
 import { prepareSqlWorkspaceResults } from './sql-workspace.mjs';
 import {
   buildAddColumn,
+  buildCreateIndex,
   buildCreateTable,
   buildDropColumn,
+  buildDropIndex,
   buildDropTable,
   buildRenameTable,
+  parseIndexColumnNames,
 } from './schema-management.mjs';
 
 const ROW_COPY_FORMATS = [
@@ -141,6 +145,7 @@ let tables = [];
 const rowCountCache = createRowCountCache();
 let metadataLoadGeneration = 0;
 let activeTableName = null;
+let selectedSchemaObject = null;
 let activeView = 'data';
 let filter = '';
 let columnFilters = {};
@@ -420,6 +425,16 @@ function buildShell() {
     text: 'Drop table',
     attributes: { type: 'button', 'data-action': 'drop-table' },
   });
+  const createIndex = createElement('button', {
+    className: 'toolbar-button',
+    text: 'Create index',
+    attributes: { type: 'button', 'data-action': 'create-index' },
+  });
+  const dropIndex = createElement('button', {
+    className: 'toolbar-button danger',
+    text: 'Drop index',
+    attributes: { type: 'button', 'data-action': 'drop-index', disabled: 'true' },
+  });
   const schema = createElement('pre', { className: 'schema-view hidden' });
   const schemaGraph = createElement('div', { className: 'schema-graph-wrap' });
   const schemaGraphButton = createElement('button', {
@@ -461,7 +476,7 @@ function buildShell() {
               }),
             ],
           }),
-          createElement('div', { className: 'schema-toolbar', children: [newTable, renameTable, addColumn, dropColumn, dropTable] }),
+          createElement('div', { className: 'schema-toolbar', children: [newTable, renameTable, addColumn, dropColumn, dropTable, createIndex, dropIndex] }),
         ],
       }),
       createElement('div', {
@@ -732,6 +747,8 @@ function buildShell() {
     addColumn,
     dropColumn,
     dropTable,
+    createIndex,
+    dropIndex,
     grid,
     pager,
     schema,
@@ -925,6 +942,7 @@ function handleLoadError(message, settings) {
   tables = [];
   schemaObjects = [];
   activeTableName = null;
+  selectedSchemaObject = null;
   visibleRows = [];
   totalRows = 0;
   isDirty = false;
@@ -1051,6 +1069,7 @@ async function refreshTables() {
   activeTableName = activeTableName && tables.some((table) => table.name === activeTableName)
     ? activeTableName
     : tables[0]?.name ?? null;
+  selectedSchemaObject = resolveSchemaSelection(schemaObjects, selectedSchemaObject, activeTableName);
   renderSidebar();
   renderSchema();
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
@@ -1361,12 +1380,17 @@ function appendObjectSection(label, objects) {
       objectName: object.name,
       tableName: object.tableName,
     });
+    const isSelected = object.type === selectedSchemaObject?.type && object.name === selectedSchemaObject?.name;
     const className = [
-      object.name === activeTableName ? 'object-item active' : 'object-item',
+      isSelected ? 'object-item active' : 'object-item',
       interaction.browsable ? '' : 'secondary',
     ].filter(Boolean).join(' ');
-    const attributes = interaction.browsable ? { type: 'button', 'data-table': object.name } : {};
-    const tagName = interaction.browsable ? 'button' : 'div';
+    const attributes = interaction.browsable
+      ? { type: 'button', 'data-table': object.name }
+      : interaction.selectable
+        ? { type: 'button', 'data-schema-object': object.name, 'data-schema-object-type': object.type }
+        : {};
+    const tagName = interaction.selectable ? 'button' : 'div';
     const meta = interaction.browsable
       ? formatRowCount(object.rowCount, {
         loading: object.type === 'table' && object.rowCount === null,
@@ -1409,6 +1433,15 @@ function focusColumnFilter(columnName) {
 }
 
 function renderSchema() {
+  const schemaObject = getSelectedSchemaObject();
+  elements.dropIndex.disabled = schemaObject?.type !== 'index';
+  elements.createIndex.disabled = !tables.some((candidate) => candidate.type === 'table');
+  if (schemaObject && (schemaObject.type === 'index' || schemaObject.type === 'trigger')) {
+    elements.schema.textContent = formatSchemaObjectDdl(schemaObject);
+    renderSchemaGraph();
+    setActiveSchemaView(activeSchemaView);
+    return;
+  }
   const table = getActiveTable();
   if (!table) {
     elements.schema.textContent = 'No schema available.';
@@ -2417,6 +2450,12 @@ async function handleClick(event) {
     return;
   }
 
+  const schemaObjectButton = event.target.closest('[data-schema-object]');
+  if (schemaObjectButton) {
+    selectSchemaObject(schemaObjectButton.dataset.schemaObjectType, schemaObjectButton.dataset.schemaObject);
+    return;
+  }
+
   const sortButton = event.target.closest('[data-sort-column]');
   if (sortButton) {
     const column = sortButton.dataset.sortColumn;
@@ -2488,6 +2527,7 @@ async function selectTable(tableName) {
     return;
   }
   activeTableName = tableName;
+  selectedSchemaObject = schemaObjects.find((object) => object.name === tableName) ?? null;
   page = 1;
   columnFilters = {};
   sortColumn = null;
@@ -2497,6 +2537,18 @@ async function selectTable(tableName) {
   renderSidebar();
   renderSchema();
   await refreshRows();
+}
+
+function selectSchemaObject(type, name) {
+  const object = schemaObjects.find((candidate) => candidate.type === type && candidate.name === name);
+  if (!object) {
+    return;
+  }
+  selectedSchemaObject = object;
+  setActiveView('schema');
+  setActiveSchemaView('ddl');
+  renderSidebar();
+  renderSchema();
 }
 
 async function runAction(action, sourceElement = null) {
@@ -2572,6 +2624,12 @@ async function runAction(action, sourceElement = null) {
       break;
     case 'drop-table':
       await dropActiveTable(sourceElement);
+      break;
+    case 'create-index':
+      showCreateIndexDialog();
+      break;
+    case 'drop-index':
+      await dropSelectedIndex(sourceElement);
       break;
   }
 }
@@ -3428,10 +3486,71 @@ async function dropActiveTable(invoker = null) {
   return applySchemaChange(buildDropTable({ tableName: table.name }), { nextActiveTableName: null });
 }
 
-async function applySchemaChange(sql, { nextActiveTableName = activeTableName } = {}) {
+function showCreateIndexDialog() {
+  const editableTables = tables.filter((table) => table.type === 'table');
+  if (editableTables.length === 0) {
+    return;
+  }
+  const initialTable = getEditableTable() ?? editableTables[0];
+  showSchemaDialog({
+    title: 'Create index',
+    submitText: 'Create index',
+    fields: [
+      { name: 'indexName', label: 'Index name', required: true },
+      { name: 'tableName', label: 'Table', type: 'select', options: editableTables.map((table) => table.name), value: initialTable.name, required: true },
+      { name: 'columns', label: 'Ordered columns (comma-separated)', value: initialTable.columns[0]?.name ?? '', required: true },
+      { name: 'direction', label: 'Sort direction', type: 'select', options: [{ label: 'Default', value: '' }, 'ASC', 'DESC'] },
+      { name: 'unique', label: 'Unique', type: 'checkbox' },
+    ],
+    onSubmit: async (values) => {
+      const indexName = values.indexName.trim();
+      return applySchemaChange(buildCreateIndex({
+        indexName,
+        tableName: values.tableName,
+        columns: parseIndexColumnNames(values.columns, values.direction),
+        unique: values.unique,
+      }), {
+        nextActiveTableName: values.tableName,
+        nextSchemaObject: { type: 'index', name: indexName },
+      });
+    },
+  });
+}
+
+async function dropSelectedIndex(invoker = null) {
+  const index = getSelectedSchemaObject();
+  if (index?.type !== 'index') {
+    return { ok: false };
+  }
+  let sql;
+  try {
+    sql = buildDropIndex({ indexName: index.name });
+  } catch (error) {
+    const message = getErrorMessage(error);
+    elements.status.textContent = message;
+    return { ok: false, error: message };
+  }
+  const confirmed = await confirmDestructiveAction(createConfirmationModel({
+    kind: 'index',
+    target: index.name,
+  }), invoker);
+  if (!confirmed) {
+    return { ok: false };
+  }
+  return applySchemaChange(sql, {
+    nextActiveTableName: index.tableName,
+    nextSchemaObject: { type: 'table', name: index.tableName },
+  });
+}
+
+async function applySchemaChange(sql, {
+  nextActiveTableName = activeTableName,
+  nextSchemaObject = selectedSchemaObject,
+} = {}) {
   try {
     runWrite(db, sql);
     activeTableName = nextActiveTableName;
+    selectedSchemaObject = nextSchemaObject;
     markChanged();
     await refreshTables();
     return { ok: true };
@@ -3501,8 +3620,14 @@ function createSchemaField(field) {
   if (field.type === 'select') {
     control = createElement('select', { attributes: { name: field.name, required: field.required ? 'true' : undefined } });
     for (const option of field.options) {
-      control.append(createElement('option', { text: option, attributes: { value: option } }));
+      const optionValue = typeof option === 'string' ? option : option.value;
+      const optionLabel = typeof option === 'string' ? option : option.label;
+      control.append(createElement('option', {
+        text: optionLabel,
+        attributes: { value: optionValue, selected: optionValue === field.value ? 'selected' : undefined },
+      }));
     }
+    control.value = field.value ?? String(typeof field.options[0] === 'string' ? field.options[0] : field.options[0]?.value ?? '');
   } else if (field.type === 'checkbox') {
     control = createElement('input', {
       attributes: {
@@ -3770,12 +3895,14 @@ function updatePager() {
   elements.previousPage.classList.toggle('hidden', editorSettings.autoPagination);
   elements.nextPage.classList.toggle('hidden', editorSettings.autoPagination);
   const editable = table?.type === 'table';
+  const selectedSchemaTable = getSelectedSchemaObject()?.type === 'table' ? table : null;
+  const schemaEditable = selectedSchemaTable?.name === table?.name && editable;
   elements.addRow.disabled = !editable;
   elements.deleteSelectedRows.disabled = !editable || getVisibleSelectedRows().length === 0;
-  elements.renameTable.disabled = !editable;
-  elements.addColumn.disabled = !editable;
-  elements.dropColumn.disabled = !editable || table.columns.length === 0;
-  elements.dropTable.disabled = !editable;
+  elements.renameTable.disabled = !schemaEditable;
+  elements.addColumn.disabled = !schemaEditable;
+  elements.dropColumn.disabled = !schemaEditable || table.columns.length === 0;
+  elements.dropTable.disabled = !schemaEditable;
   elements.exportCsv.disabled = !table;
   const sqlExportUi = getSqlExportUiState(sqlExportState, { hasTables: tables.length > 0 });
   elements.exportSql.disabled = sqlExportUi.disabled;
@@ -3784,6 +3911,12 @@ function updatePager() {
 
 function getActiveTable() {
   return tables.find((table) => table.name === activeTableName) ?? null;
+}
+
+function getSelectedSchemaObject() {
+  return schemaObjects.find((object) => (
+    object.type === selectedSchemaObject?.type && object.name === selectedSchemaObject?.name
+  )) ?? null;
 }
 
 function getEditableTable() {

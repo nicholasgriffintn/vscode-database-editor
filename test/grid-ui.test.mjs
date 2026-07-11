@@ -232,6 +232,7 @@ test('destructive webview actions use shared confirmations and dirty row dialogs
   assert.match(source, /kind: 'row',[\s\S]{0,160}tableName: table\.name,[\s\S]{0,160}rowNumber:/);
   assert.match(source, /kind: 'column',[\s\S]{0,160}columnName: values\.columnName/);
   assert.match(source, /kind: 'table',[\s\S]{0,160}tableName: table\.name/);
+  assert.match(source, /kind: 'index',[\s\S]{0,160}target: index\.name/);
   assert.match(source, /if \(hasDirtyDraft\)[\s\S]{0,240}createDiscardDraftModel/);
   assert.match(source, /dialog\.addEventListener\('cancel',[\s\S]{0,240}event\.preventDefault\(\)/);
   assert.match(source, /const result = await deleteRowAt\(rowIndex, remove\);\s*if \(result\.deleted\) \{\s*dialog\.close\(\)/);
@@ -363,22 +364,26 @@ test('text editing shortcuts stay inside row detail fields', () => {
 test('tables and views are browsable sidebar objects', () => {
   assert.deepEqual(getObjectItemInteraction({ objectType: 'table', objectName: 'people', tableName: null }), {
     browsable: true,
+    selectable: true,
     title: undefined,
   });
   assert.deepEqual(getObjectItemInteraction({ objectType: 'view', objectName: 'active_people', tableName: null }), {
     browsable: true,
+    selectable: true,
     title: undefined,
   });
 });
 
-test('indexes and triggers are not browsable and explain why', () => {
+test('indexes and triggers are selectable for DDL inspection but not data-browsable', () => {
   assert.deepEqual(getObjectItemInteraction({ objectType: 'index', objectName: 'people_name', tableName: 'people' }), {
     browsable: false,
-    title: 'people_name is not directly browsable · defined on people',
+    selectable: true,
+    title: 'Inspect people_name DDL · defined on people',
   });
   assert.deepEqual(getObjectItemInteraction({ objectType: 'trigger', objectName: 'people_name_required', tableName: 'people' }), {
     browsable: false,
-    title: 'people_name_required is not directly browsable · defined on people',
+    selectable: true,
+    title: 'Inspect people_name_required DDL · defined on people',
   });
 });
 

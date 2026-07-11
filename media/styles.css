@@ -220,12 +220,11 @@ button {
 }
 
 .object-item.secondary {
-  cursor: default;
   opacity: 0.75;
 }
 
 .object-item.secondary:hover {
-  background: transparent;
+  opacity: 1;
 }
 
 .object-name {
