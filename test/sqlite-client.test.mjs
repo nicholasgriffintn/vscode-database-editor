@@ -8,6 +8,7 @@ import {
   getRowCount,
   getSchemaObjects,
   hasRowid,
+  normalizeColumnMetadata,
   queryAll,
   queryGridRows,
   readTableMetadata,
@@ -15,7 +16,7 @@ import {
   runWrite,
   runWriteBatch,
 } from '../media/sqlite-client.mjs';
-import { analyzeSqlScript, buildDelete, buildTableSelect, buildUpdate } from '../media/sql-utils.mjs';
+import { analyzeSqlScript, buildDelete, buildInsert, buildTableSelect, buildUpdate } from '../media/sql-utils.mjs';
 
 async function createDatabase() {
   const SQL = await initSqlJs({
@@ -114,7 +115,29 @@ test('database configuration fails visibly when foreign keys remain disabled', a
   );
 });
 
-test.todo('discovers virtual and stored generated columns as read-only metadata', async () => {
+test('normalizes hidden and generated column metadata across SQLite variants', () => {
+  const base = { name: 'value', type: 'TEXT', notnull: 0, dflt_value: null, pk: 0 };
+  assert.deepEqual(
+    [undefined, 1, 2, 3].map((hidden) => {
+      const column = normalizeColumnMetadata({ ...base, hidden });
+      return {
+        hidden: column.hidden,
+        generated: column.generated,
+        readOnly: column.readOnly,
+        canInsert: column.canInsert,
+        canUpdate: column.canUpdate,
+      };
+    }),
+    [
+      { hidden: false, generated: false, readOnly: false, canInsert: true, canUpdate: true },
+      { hidden: true, generated: false, readOnly: true, canInsert: false, canUpdate: false },
+      { hidden: false, generated: 'virtual', readOnly: true, canInsert: false, canUpdate: false },
+      { hidden: false, generated: 'stored', readOnly: true, canInsert: false, canUpdate: false },
+    ],
+  );
+});
+
+test('discovers virtual and stored generated columns as read-only metadata', async () => {
   const db = await createDatabase();
   db.run(`CREATE TABLE generated_people (
     first_name TEXT NOT NULL,
@@ -130,12 +153,47 @@ test.todo('discovers virtual and stored generated columns as read-only metadata'
     name: column.name,
     generated: column.generated,
     readOnly: column.readOnly,
+    canInsert: column.canInsert,
+    canUpdate: column.canUpdate,
   })), [
-    { name: 'first_name', generated: false, readOnly: false },
-    { name: 'last_name', generated: false, readOnly: false },
-    { name: 'full_name', generated: 'virtual', readOnly: true },
-    { name: 'name_length', generated: 'stored', readOnly: true },
+    { name: 'first_name', generated: false, readOnly: false, canInsert: true, canUpdate: true },
+    { name: 'last_name', generated: false, readOnly: false, canInsert: true, canUpdate: true },
+    { name: 'full_name', generated: 'virtual', readOnly: true, canInsert: false, canUpdate: false },
+    { name: 'name_length', generated: 'stored', readOnly: true, canInsert: false, canUpdate: false },
   ]);
+
+  const insertion = buildInsert({
+    tableName: table.name,
+    values: {
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      full_name: 'must be omitted',
+      name_length: -1,
+    },
+    columns: table.columns,
+  });
+  runWrite(db, insertion.sql, insertion.params, { expectedRowsModified: 1 });
+  assert.deepEqual(queryAll(db, 'SELECT first_name, last_name, full_name, name_length FROM generated_people'), [{
+    first_name: 'Ada',
+    last_name: 'Lovelace',
+    full_name: 'Ada Lovelace',
+    name_length: 11,
+  }]);
+
+  const firstName = table.columns.find((column) => column.name === 'first_name');
+  const update = buildUpdate({
+    tableName: table.name,
+    columnName: firstName.name,
+    column: firstName,
+    identity: { kind: 'rowid', value: 1n },
+    primaryKeyColumns: table.primaryKeyColumns,
+    rowidAlias: table.rowidAlias,
+  });
+  runWrite(db, update.sql, ['Augusta', ...update.identityParams], { expectedRowsModified: 1 });
+  assert.deepEqual(queryAll(db, 'SELECT full_name, name_length FROM generated_people'), [{
+    full_name: 'Augusta Lovelace',
+    name_length: 15,
+  }]);
   db.close();
 });
 

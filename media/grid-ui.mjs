@@ -1,8 +1,22 @@
-export function getCellInteraction({ tableType, value }) {
+export function getCellInteraction({ tableType, column, value }) {
   if (tableType === 'view') {
     return {
       disabled: true,
       title: 'Views are read-only',
+    };
+  }
+
+  if (column?.generated) {
+    return {
+      disabled: true,
+      title: 'Generated columns are read-only',
+    };
+  }
+
+  if (column?.canUpdate === false || column?.readOnly) {
+    return {
+      disabled: true,
+      title: 'This column is read-only',
     };
   }
 

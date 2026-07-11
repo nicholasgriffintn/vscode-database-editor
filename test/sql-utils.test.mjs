@@ -166,6 +166,39 @@ test('parses edited values using declared column types', () => {
   assert.throws(() => parseCellInput('4.5ms', { name: 'score', type: 'REAL' }, ''), /expects a numeric/);
 });
 
+test('omits generated columns from inserts and rejects generated-column updates', () => {
+  const generatedColumn = {
+    name: 'full_name',
+    generated: 'virtual',
+    readOnly: true,
+    canInsert: false,
+    canUpdate: false,
+  };
+  const normalColumn = {
+    name: 'first_name',
+    generated: false,
+    readOnly: false,
+    canInsert: true,
+    canUpdate: true,
+  };
+
+  assert.deepEqual(buildInsert({
+    tableName: 'people',
+    values: { first_name: 'Ada', full_name: 'wrong' },
+    columns: [normalColumn, generatedColumn],
+  }), {
+    sql: 'INSERT INTO "people" ("first_name") VALUES (?)',
+    params: ['Ada'],
+  });
+  assert.throws(() => buildUpdate({
+    tableName: 'people',
+    columnName: 'full_name',
+    column: generatedColumn,
+    identity: { kind: 'rowid', value: 1n },
+    primaryKeyColumns: [],
+  }), /generated columns are read-only/i);
+});
+
 test('analyzes read-only SQL scripts without mutating flags', () => {
   assert.deepEqual(analyzeSqlScript('SELECT * FROM people'), {
     statements: ['SELECT * FROM people'],

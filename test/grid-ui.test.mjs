@@ -94,7 +94,7 @@ test('views and blob cells do not expose inline editing', () => {
   });
 });
 
-test.todo('generated table columns render as read-only cells', () => {
+test('generated table columns render as read-only cells', () => {
   assert.deepEqual(getCellInteraction({
     tableType: 'table',
     column: { name: 'full_name', generated: 'virtual', readOnly: true },

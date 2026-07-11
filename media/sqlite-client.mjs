@@ -67,13 +67,17 @@ export function readTableMetadata(db, schemaObjects) {
 
 function readColumns(db, tableName) {
   try {
-    return queryAll(db, `PRAGMA table_xinfo(${quoteIdentifier(tableName)})`);
+    const extendedColumns = queryAll(db, `PRAGMA table_xinfo(${quoteIdentifier(tableName)})`);
+    if (extendedColumns.length > 0) {
+      return extendedColumns;
+    }
   } catch {
-    return queryAll(db, `PRAGMA table_info(${quoteIdentifier(tableName)})`);
+    // Fall through to table_info for older SQLite runtimes.
   }
+  return queryAll(db, `PRAGMA table_info(${quoteIdentifier(tableName)})`);
 }
 
-function normalizeColumnMetadata(column, foreignKeys, indexedColumns) {
+export function normalizeColumnMetadata(column, foreignKeys = [], indexedColumns = new Set()) {
   const hiddenCode = Number(column.hidden ?? 0);
   const generated = hiddenCode === 2 ? 'virtual' : hiddenCode === 3 ? 'stored' : false;
   const hidden = hiddenCode === 1;
@@ -90,6 +94,8 @@ function normalizeColumnMetadata(column, foreignKeys, indexedColumns) {
     hidden,
     generated,
     readOnly: hidden || Boolean(generated),
+    canInsert: !hidden && !generated,
+    canUpdate: !hidden && !generated && Number(column.pk) === 0,
   };
 }
 

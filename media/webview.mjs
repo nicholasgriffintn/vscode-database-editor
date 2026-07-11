@@ -65,7 +65,6 @@ import {
   queryGridRows,
   readTableMetadata,
   runSqlScript,
-  runStatement,
   runWrite,
   runWriteBatch,
 } from './sqlite-client.mjs';
@@ -184,6 +183,14 @@ function getBadgeItems(column) {
       className: 'column-badge column-badge-idx',
       icon: '\u26A1',
       title: 'Indexed',
+    });
+  }
+  if (column.generated) {
+    items.push({
+      label: 'GEN',
+      className: 'column-badge column-badge-generated',
+      icon: null,
+      title: `${column.generated === 'stored' ? 'Stored' : 'Virtual'} generated column · read-only`,
     });
   }
   items.push({
@@ -1804,7 +1811,7 @@ function renderGrid({ appendFrom = null } = {}) {
 
     for (const column of table.columns) {
       const value = row.values[column.name];
-      const interaction = getCellInteraction({ tableType: table.type, value });
+      const interaction = getCellInteraction({ tableType: table.type, column, value });
       const isPinned = pinnedColumns.has(column.name);
       const colWidth = columnWidths[column.name];
 
@@ -2019,6 +2026,7 @@ function buildColumnTitle(column) {
   return [
     column.type || 'ANY',
     column.primaryKeyOrder ? `Primary key (order ${column.primaryKeyOrder})` : null,
+    column.generated ? `${column.generated === 'stored' ? 'Stored' : 'Virtual'} generated column · read-only` : null,
     column.foreignKeyTarget ? `Foreign key \u2192 ${column.foreignKeyTarget}` : null,
     column.indexed ? 'Indexed' : null,
     column.nullable ? 'Nullable' : 'Not null',
@@ -2160,7 +2168,7 @@ async function smartDeleteSelection() {
   if (selectedCell) {
     const row = visibleRows[selectedCell.rowIndex];
     const column = table.columns.find((candidate) => candidate.name === selectedCell.columnName);
-    if (row && column && !column.primaryKeyOrder && !(row.values[column.name] instanceof Uint8Array)) {
+    if (row && column && column.canUpdate !== false && !column.readOnly && !(row.values[column.name] instanceof Uint8Array)) {
       await updateCell(table, row, column, null, row.values[column.name]);
       elements.status.textContent = `Cleared ${column.name}${buildAutoCommitStatusSuffix()}`;
     }
@@ -2379,7 +2387,7 @@ function handleDoubleClick(event) {
   const table = getActiveTable();
   const row = visibleRows[rowIndex];
   const column = table?.columns.find((candidate) => candidate.name === columnName);
-  const canInlineEdit = Boolean(table?.type === 'table' && row && column && !column.primaryKeyOrder && !(row.values[column.name] instanceof Uint8Array));
+  const canInlineEdit = Boolean(table?.type === 'table' && row && column && column.canUpdate !== false && !column.readOnly && !(row.values[column.name] instanceof Uint8Array));
   const editMode = getDoubleClickEditMode({
     behavior: editorSettings.doubleClickBehavior,
     canInlineEdit,
@@ -2513,7 +2521,7 @@ function showInlineCellEditor(rowIndex, columnName) {
   const table = getEditableTable();
   const row = visibleRows[rowIndex];
   const column = table?.columns.find((candidate) => candidate.name === columnName);
-  if (!table || !row || !column || column.primaryKeyOrder || row.values[column.name] instanceof Uint8Array) {
+  if (!table || !row || !column || column.canUpdate === false || column.readOnly || row.values[column.name] instanceof Uint8Array) {
     showRowDetails(rowIndex, columnName);
     return;
   }
@@ -2610,7 +2618,7 @@ function showRowDetails(rowIndex, initialColumnName = null) {
   for (const column of table.columns) {
     const value = row.values[column.name];
     const isBlob = value instanceof Uint8Array;
-    const readOnly = isBlob || column.primaryKeyOrder > 0;
+    const readOnly = isBlob || column.canUpdate === false || column.readOnly;
     const control = isBlob
       ? createBlobPreview({
           tableName: table.name,
@@ -2785,6 +2793,7 @@ function buildRowFieldMeta(column) {
     column.type || 'ANY',
     column.nullable ? 'nullable' : 'not null',
     column.primaryKeyOrder ? 'primary key' : null,
+    column.generated ? `${column.generated} generated` : null,
     column.foreignKeyTarget ? `FK ${column.foreignKeyTarget}` : null,
   ].filter(Boolean).join(' · ');
 }
@@ -2935,6 +2944,7 @@ async function saveRowDetails(table, row, form, validationSummary) {
       const update = buildUpdate({
         tableName: table.name,
         columnName: column.name,
+        column,
         identity: row.identity,
         primaryKeyColumns: table.primaryKeyColumns,
         rowidAlias: table.rowidAlias,
@@ -2956,16 +2966,7 @@ async function saveRowDetails(table, row, form, validationSummary) {
       return { saved: true };
     }
 
-    db.run('BEGIN IMMEDIATE');
-    try {
-      for (const update of updates) {
-        runStatement(db, update.sql, update.params);
-      }
-      db.run('COMMIT');
-    } catch (error) {
-      db.run('ROLLBACK');
-      throw error;
-    }
+    runWriteBatch(db, updates);
 
     markChanged();
     await refreshRows();
@@ -2982,6 +2983,7 @@ async function updateCell(table, row, column, input, previousValue) {
     const update = buildUpdate({
       tableName: table.name,
       columnName: column.name,
+      column,
       identity: row.identity,
       primaryKeyColumns: table.primaryKeyColumns,
       rowidAlias: table.rowidAlias,
@@ -3102,7 +3104,8 @@ function showInsertDialog() {
   );
 
   const fields = form.querySelector('.insert-fields');
-  for (const column of table.columns) {
+  const insertableColumns = table.columns.filter((column) => column.canInsert !== false && !column.generated && !column.hidden);
+  for (const column of insertableColumns) {
     const input = createElement('input', {
       attributes: {
         type: 'text',
@@ -3152,7 +3155,7 @@ function showInsertDialog() {
 async function insertRow(table, form) {
   try {
     const values = {};
-    for (const column of table.columns) {
+    for (const column of table.columns.filter((candidate) => candidate.canInsert !== false && !candidate.generated && !candidate.hidden)) {
       const input = form.elements.namedItem(column.name);
       const nullInput = form.querySelector(`[data-null-column="${CSS.escape(column.name)}"]`);
       if (nullInput.checked) {
@@ -3162,8 +3165,8 @@ async function insertRow(table, form) {
       }
     }
 
-    const insertion = buildInsert({ tableName: table.name, values });
-    runWrite(db, insertion.sql, insertion.params);
+    const insertion = buildInsert({ tableName: table.name, values, columns: table.columns });
+    runWrite(db, insertion.sql, insertion.params, { expectedRowsModified: 1 });
     markChanged();
     await refreshTables();
   } catch (error) {

@@ -56,7 +56,12 @@ export function buildTableCount({ tableName, columns, filter, columnFilters = {}
   };
 }
 
-export function buildUpdate({ tableName, columnName, identity, primaryKeyColumns, rowidAlias = '_rowid_' }) {
+export function buildUpdate({ tableName, columnName, column, identity, primaryKeyColumns, rowidAlias = '_rowid_' }) {
+  if (column?.canUpdate === false || column?.readOnly) {
+    throw new Error(column.generated
+      ? 'Generated columns are read-only and cannot be updated.'
+      : `${column.name || columnName} is read-only and cannot be updated.`);
+  }
   const where = buildIdentityWhere(identity, primaryKeyColumns, rowidAlias, tableName);
   return {
     sql: `UPDATE ${quoteIdentifier(tableName)} SET ${quoteIdentifier(columnName)} = ? WHERE ${where.sql}`,
@@ -72,8 +77,17 @@ export function buildDelete({ tableName, identity, primaryKeyColumns, rowidAlias
   };
 }
 
-export function buildInsert({ tableName, values }) {
-  const entries = Object.entries(values);
+export function buildInsert({ tableName, values, columns: columnMetadata }) {
+  const metadataByName = columnMetadata
+    ? new Map(columnMetadata.map((column) => [column.name, column]))
+    : null;
+  const entries = Object.entries(values).filter(([name]) => {
+    if (!metadataByName) {
+      return true;
+    }
+    const column = metadataByName.get(name);
+    return Boolean(column && column.canInsert !== false && !column.generated && !column.hidden);
+  });
   if (entries.length === 0) {
     return {
       sql: `INSERT INTO ${quoteIdentifier(tableName)} DEFAULT VALUES`,
