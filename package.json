@@ -596,18 +596,22 @@
     "vendor:sqljs": "node scripts/vendor-sqljs.mjs",
     "vendor:sqljs:check": "node scripts/vendor-sqljs.mjs --check",
     "test": "pnpm run compile && node --test",
+    "version": "pnpm changeset version",
     "package": "pnpm run compile",
     "vsce:package": "vsce package --no-dependencies --allow-missing-repository",
     "validate:local": "pnpm run vendor:sqljs:check && pnpm test && pnpm run fixture:sqlite && pnpm run vsce:package",
     "website:dev": "wrangler dev --config wrangler.toml",
     "website:deploy": "wrangler deploy --config wrangler.toml",
-    "vscode:prepublish": "pnpm run package"
+    "vscode:prepublish": "pnpm run package && pnpm run vsce:package",
+    "prepublish": "pnpm run version && vscode:prepublish"
   },
   "devDependencies": {
-    "sql.js": "^1.14.1",
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.31.0",
     "@types/node": "^26.1.0",
     "@types/vscode": "^1.125.0",
     "@vscode/vsce": "^3.9.2",
+    "sql.js": "^1.14.1",
     "typescript": "^6.0.3",
     "wrangler": "^4.108.0"
   }
