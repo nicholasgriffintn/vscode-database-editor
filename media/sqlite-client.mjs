@@ -4,6 +4,7 @@ import {
   buildTableCount,
   quoteIdentifier,
 } from './sql-utils.mjs';
+import { executeSqlScript } from './sql-workspace.mjs';
 
 export function configureDatabase(db) {
   db.run('PRAGMA foreign_keys = ON');
@@ -246,7 +247,7 @@ function assertExpectedRowsModified(db, expected) {
   }
 }
 
-export function runSqlScript(db, sql, analysis = analyzeSqlScript(sql)) {
+export function runSqlScript(db, sql, analysis = analyzeSqlScript(sql), options = {}) {
   if (analysis.isEmpty) {
     return { results: [], changed: false };
   }
@@ -254,12 +255,12 @@ export function runSqlScript(db, sql, analysis = analyzeSqlScript(sql)) {
   assertSqlScriptCanExport(analysis);
 
   if (!analysis.mutates) {
-    return { results: db.exec(sql), changed: false };
+    return { results: executeSqlScript(db, sql, options), changed: false };
   }
 
   if (analysis.hasTransactionControl) {
     try {
-      const results = db.exec(sql);
+      const results = executeSqlScript(db, sql, options);
       assertSqlScriptCanExport(analysis);
       return { results, changed: true };
     } catch (error) {
@@ -271,7 +272,7 @@ export function runSqlScript(db, sql, analysis = analyzeSqlScript(sql)) {
 
   db.run('BEGIN IMMEDIATE');
   try {
-    const results = db.exec(sql);
+    const results = executeSqlScript(db, sql, options);
     db.run('COMMIT');
     return { results, changed: true };
   } catch (error) {

@@ -455,7 +455,7 @@ function splitSqlStatements(sql) {
   return statements;
 }
 
-function isReadOnlyStatement(statement) {
+export function isReadOnlyStatement(statement) {
   const keyword = getLeadingKeyword(statement);
   if (keyword === 'select' || keyword === 'values') {
     return true;

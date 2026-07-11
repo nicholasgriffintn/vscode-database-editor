@@ -457,6 +457,46 @@ test('runs read-only SQL scripts and reports unchanged result sets', async () =>
   db.close();
 });
 
+test('read-only SQL scripts stop stepping after the preview limit plus one row', async () => {
+  const db = await createDatabase();
+  let steps = 0;
+  const trackingDatabase = new Proxy(db, {
+    get(target, property) {
+      if (property === 'iterateStatements') {
+        return (sql) => {
+          const iterator = target.iterateStatements(sql);
+          return {
+            next() {
+              const next = iterator.next();
+              if (!next.done) {
+                const step = next.value.step.bind(next.value);
+                next.value.step = () => {
+                  steps += 1;
+                  return step();
+                };
+              }
+              return next;
+            },
+          };
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const sql = `WITH RECURSIVE numbers(value) AS (
+    VALUES(1) UNION ALL SELECT value + 1 FROM numbers WHERE value < 1000000
+  ) SELECT value FROM numbers`;
+
+  const result = runSqlScript(trackingDatabase, sql, analyzeSqlScript(sql), { previewLimit: 25 });
+
+  assert.equal(steps, 26);
+  assert.equal(result.results[0].values.length, 25);
+  assert.equal(result.results[0].rowCount, 26);
+  assert.equal(result.results[0].truncated, true);
+  db.close();
+});
+
 test('runs successful mutating SQL scripts inside an automatic transaction', async () => {
   const db = await createPeopleDatabase();
 

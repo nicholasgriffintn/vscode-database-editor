@@ -3670,43 +3670,41 @@ async function runSqlWorkspace() {
   recordQueryHistory(querySql);
 
   try {
-    const { results, changed } = runSqlScript(db, querySql, analysis);
+    const previewLimit = getQueryResultPreviewLimit();
+    const { results, changed } = runSqlScript(db, querySql, analysis, {
+      previewLimit,
+      timeoutMs: editorSettings.queryTimeoutMs,
+    });
     assertSqlScriptCanExport(analysis);
     if (changed) {
       markChanged();
       await refreshTables();
     }
 
-    const previewLimit = getQueryResultPreviewLimit();
     let rowCount = 0;
-    let totalTruncatedRows = 0;
     let truncatedStatements = 0;
 
     for (const [index, result] of results.entries()) {
-      const originalRowCount = result.values.length;
-      rowCount += originalRowCount;
-      if (previewLimit > 0 && originalRowCount > previewLimit) {
-        totalTruncatedRows += originalRowCount - previewLimit;
-        result.values.length = previewLimit;
-        result.__truncatedRows = originalRowCount - previewLimit;
-        result.__truncatedStatementIndex = index + 1;
+      rowCount += result.rowCount;
+      result.__truncated = result.truncated;
+      result.__rowCount = result.rowCount;
+      result.__truncatedStatementIndex = result.statementIndex ?? index + 1;
+      if (result.truncated) {
         truncatedStatements += 1;
-      } else {
-        result.__truncatedRows = 0;
-        result.__truncatedStatementIndex = index + 1;
       }
     }
 
     if (results.length > 0) {
       const truncationMessage = truncatedStatements
-        ? ` · truncated ${totalTruncatedRows.toLocaleString()} of ${rowCount.toLocaleString()} rows to ${previewLimit.toLocaleString()} per result set`
+        ? ` · ${truncatedStatements.toLocaleString()} result set${truncatedStatements === 1 ? '' : 's'} truncated to ${previewLimit.toLocaleString()} retained rows`
         : '';
+      const countLabel = `${truncatedStatements ? 'at least ' : ''}${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'}`;
       setQueryMessage(changed
-        ? `${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'} · database modified${truncationMessage}`
-        : `${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'}${truncationMessage}`,
+        ? `${countLabel} · database modified${truncationMessage}`
+        : `${countLabel}${truncationMessage}`,
       changed ? 'success' : 'info');
       for (const result of results) {
-        elements.queryOutput.append(renderResultTable(result));
+        elements.queryOutput.append(await renderResultTable(result));
       }
       return;
     }
@@ -3780,7 +3778,7 @@ function exportSqlDump() {
   });
 }
 
-function renderResultTable(result) {
+async function renderResultTable(result) {
   const tableElement = createElement('table', { className: 'data-grid result-grid' });
   const thead = createElement('thead');
   thead.append(createElement('tr', {
@@ -3789,13 +3787,16 @@ function renderResultTable(result) {
   tableElement.append(thead);
 
   const tbody = createElement('tbody');
-  for (const row of result.values) {
+  for (const [index, row] of result.values.entries()) {
     tbody.append(createElement('tr', {
       children: row.map((value) => createElement('td', { text: describeValue(value) })),
     }));
+    if (index > 0 && index % 200 === 0) {
+      await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    }
   }
 
-  if (result.__truncatedRows > 0) {
+  if (result.__truncated) {
     tbody.append(createElement('tr', {
       className: 'query-result-truncated',
       children: [
@@ -3803,7 +3804,7 @@ function renderResultTable(result) {
           attributes: {
             colspan: String(result.columns.length),
           },
-          text: `${result.__truncatedRows.toLocaleString()} additional row${result.__truncatedRows === 1 ? '' : 's'} omitted from query result ${result.__truncatedStatementIndex ? `(statement ${result.__truncatedStatementIndex})` : ''}.`,
+          text: `Result truncated after ${result.values.length.toLocaleString()} retained rows; at least ${result.__rowCount.toLocaleString()} rows were available ${result.__truncatedStatementIndex ? `(statement ${result.__truncatedStatementIndex})` : ''}.`,
         }),
       ],
     }));
