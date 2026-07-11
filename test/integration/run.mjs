@@ -39,4 +39,9 @@ async function prepareIntegrationFixtures() {
     );
   }
   database.close();
+
+  const indexDatabase = new SQL.Database(await readFile(path.join(extensionDevelopmentPath, '.tmp', 'sample-edit-2.sqlite')));
+  indexDatabase.run('CREATE UNIQUE INDEX "teams name lookup" ON teams(name DESC)');
+  await writeFile(path.join(extensionDevelopmentPath, '.tmp', 'sample-index.sqlite'), indexDatabase.export());
+  indexDatabase.close();
 }

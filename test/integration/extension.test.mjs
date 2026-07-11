@@ -26,11 +26,31 @@ export async function run() {
 
     await testSaveWithInterveningEdit(api, fileSystem, documentUri, fixtureBytes);
     await testUndoRedoAndRevert(api, documentUri, fixtureBytes);
+    await testSchemaIndexIsOneUndoStep(api, documentUri, fixtureBytes);
     await testSaveAsAndBackupRestore(api, fileSystem, documentUri, fixtureBytes);
     await testFailedWriteAndDisposal(api, fileSystem, documentUri, fixtureBytes[4]);
   } finally {
     fileSystemRegistration.dispose();
   }
+}
+
+async function testSchemaIndexIsOneUndoStep(api, documentUri, fixtures) {
+  const before = api.getDocumentSnapshot(documentUri.toString());
+  assert.deepEqual([...before.data], [...fixtures[2]]);
+
+  await applyEdit(api, documentUri, fixtures[5], before.revision, 'Create SQLite index');
+  assert.deepEqual([...api.getDocumentSnapshot(documentUri.toString()).data], [...fixtures[5]]);
+
+  await vscode.commands.executeCommand('undo');
+  await waitForRevision(api, documentUri, before.revision + 2);
+  assert.deepEqual([...api.getDocumentSnapshot(documentUri.toString()).data], [...fixtures[2]], 'index creation should undo in one step');
+
+  await vscode.commands.executeCommand('redo');
+  await waitForRevision(api, documentUri, before.revision + 3);
+  assert.deepEqual([...api.getDocumentSnapshot(documentUri.toString()).data], [...fixtures[5]], 'index creation should redo in one step');
+
+  await vscode.commands.executeCommand('undo');
+  await waitForRevision(api, documentUri, before.revision + 4);
 }
 
 async function testSaveWithInterveningEdit(api, fileSystem, documentUri, fixtures) {
@@ -138,8 +158,8 @@ async function testFailedWriteAndDisposal(api, fileSystem, documentUri, savedByt
 }
 
 async function readFixtures(extensionUri) {
-  return Promise.all(Array.from({ length: 5 }, (_, index) => {
-    const name = index === 0 ? 'sample.sqlite' : `sample-edit-${index}.sqlite`;
+  return Promise.all(Array.from({ length: 6 }, (_, index) => {
+    const name = index === 0 ? 'sample.sqlite' : index === 5 ? 'sample-index.sqlite' : `sample-edit-${index}.sqlite`;
     return vscode.workspace.fs.readFile(vscode.Uri.joinPath(extensionUri, '.tmp', name));
   }));
 }
