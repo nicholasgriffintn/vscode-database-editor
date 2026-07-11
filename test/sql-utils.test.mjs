@@ -42,7 +42,7 @@ test('builds filtered, sorted, paged table selects with bound parameters', () =>
 
   assert.equal(
     query.sql,
-    'SELECT rowid AS __database_editor_rowid, "id", "display name", "score" FROM "people" WHERE CAST("id" AS TEXT) LIKE ? OR CAST("display name" AS TEXT) LIKE ? OR CAST("score" AS TEXT) LIKE ? ORDER BY "display name" DESC, rowid ASC LIMIT ? OFFSET ?',
+    'SELECT "people"._rowid_ AS "__database_editor_identity", "people"."id", "people"."display name", "people"."score" FROM "people" WHERE CAST("id" AS TEXT) LIKE ? OR CAST("display name" AS TEXT) LIKE ? OR CAST("score" AS TEXT) LIKE ? ORDER BY "display name" DESC, "people"._rowid_ ASC LIMIT ? OFFSET ?',
   );
   assert.deepEqual(query.params, ['%ada%', '%ada%', '%ada%', 50, 100]);
 });
@@ -75,12 +75,12 @@ test('builds table queries with global and per-column filters', () => {
 
   assert.equal(
     query.sql,
-    'SELECT rowid AS __database_editor_rowid, "id", "display name", "score" FROM "people" WHERE (CAST("id" AS TEXT) LIKE ? OR CAST("display name" AS TEXT) LIKE ? OR CAST("score" AS TEXT) LIKE ?) AND "id" >= ? AND CAST("display name" AS TEXT) LIKE ? AND "score" IS NOT NULL ORDER BY rowid ASC LIMIT ? OFFSET ?',
+    'SELECT "people"._rowid_ AS "__database_editor_identity", "people"."id", "people"."display name", "people"."score" FROM "people" WHERE (CAST("id" AS TEXT) LIKE ? OR CAST("display name" AS TEXT) LIKE ? OR CAST("score" AS TEXT) LIKE ?) AND "id" >= ? AND CAST("display name" AS TEXT) LIKE ? AND "score" IS NOT NULL ORDER BY "people"._rowid_ ASC LIMIT ? OFFSET ?',
   );
   assert.deepEqual(query.params, ['%ada%', '%ada%', '%ada%', '10', '%hopper%', 25, 0]);
 });
 
-test.todo('orders without-rowid table chunks by canonical primary-key metadata', () => {
+test('orders without-rowid table chunks by canonical primary-key metadata', () => {
   const query = buildTableSelect({
     tableName: 'memberships',
     columns: [
@@ -94,11 +94,11 @@ test.todo('orders without-rowid table chunks by canonical primary-key metadata',
 
   assert.equal(
     query.sql,
-    'SELECT "tenant_id", "user_id" FROM "memberships" ORDER BY "tenant_id" ASC, "user_id" ASC LIMIT ? OFFSET ?',
+    'SELECT "memberships"."tenant_id", "memberships"."user_id" FROM "memberships" ORDER BY "tenant_id" ASC, "user_id" ASC LIMIT ? OFFSET ?',
   );
 });
 
-test.todo('keeps hidden row identity separate from a displayed alias-collision column', () => {
+test('keeps hidden row identity separate from a displayed alias-collision column', () => {
   const query = buildTableSelect({
     tableName: 'alias_collision',
     columns: [
@@ -114,7 +114,7 @@ test.todo('keeps hidden row identity separate from a displayed alias-collision c
   assert.match(query.sql, /"alias_collision"\.(?:rowid|oid|_rowid_)/i);
 });
 
-test.todo('qualifies hidden identity so a declared rowid column cannot shadow it', () => {
+test('qualifies hidden identity so a declared rowid column cannot shadow it', () => {
   const query = buildTableSelect({
     tableName: 'declared_rowid',
     columns: [
@@ -139,10 +139,10 @@ test('builds write statements without interpolating values', () => {
   assert.deepEqual(buildUpdate({
     tableName: 'people',
     columnName: 'display name',
-    identity: { rowid: 9, primaryKey: {} },
+    identity: { kind: 'rowid', value: 9 },
     primaryKeyColumns: [],
   }), {
-    sql: 'UPDATE "people" SET "display name" = ? WHERE rowid = ?',
+    sql: 'UPDATE "people" SET "display name" = ? WHERE "people"._rowid_ = ?',
     identityParams: [9],
   });
 
@@ -380,7 +380,7 @@ test('generated statements work against SQLite', async () => {
   const update = buildUpdate({
     tableName: 'people',
     columnName: 'score',
-    identity: { rowid: rows[0].__database_editor_rowid, primaryKey: {} },
+    identity: { kind: 'rowid', value: rows[0].__database_editor_identity },
     primaryKeyColumns: [],
   });
   db.run(update.sql, [10, ...update.identityParams]);

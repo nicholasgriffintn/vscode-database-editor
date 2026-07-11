@@ -9,12 +9,13 @@ import {
   getSchemaObjects,
   hasRowid,
   queryAll,
+  queryGridRows,
   readTableMetadata,
   runSqlScript,
   runWrite,
   runWriteBatch,
 } from '../media/sqlite-client.mjs';
-import { analyzeSqlScript, buildTableSelect } from '../media/sql-utils.mjs';
+import { analyzeSqlScript, buildDelete, buildTableSelect, buildUpdate } from '../media/sql-utils.mjs';
 
 async function createDatabase() {
   const SQL = await initSqlJs({
@@ -138,7 +139,7 @@ test.todo('discovers virtual and stored generated columns as read-only metadata'
   db.close();
 });
 
-test.todo('orders real WITHOUT ROWID chunks by canonical composite primary-key metadata', async () => {
+test('orders real WITHOUT ROWID chunks by canonical composite primary-key metadata', async () => {
   const db = await createDatabase();
   db.run('CREATE TABLE memberships (tenant_id INTEGER, user_id INTEGER, label TEXT, PRIMARY KEY (tenant_id, user_id)) WITHOUT ROWID');
   for (let index = 0; index < 12; index += 1) {
@@ -164,20 +165,130 @@ test.todo('orders real WITHOUT ROWID chunks by canonical composite primary-key m
 
   assert.match(firstQuery.sql, /ORDER BY "tenant_id" ASC, "user_id" ASC/);
   const combined = [
-    ...queryAll(db, firstQuery.sql, firstQuery.params),
-    ...queryAll(db, secondQuery.sql, secondQuery.params),
+    ...queryGridRows(db, { table, query: firstQuery, resultScope: 'memberships', offset: 0 }),
+    ...queryGridRows(db, { table, query: secondQuery, resultScope: 'memberships', offset: 5 }),
   ];
-  assert.equal(new Set(combined.map((row) => `${row.tenant_id}:${row.user_id}`)).size, 10);
+  assert.equal(new Set(combined.map((row) => `${row.values.tenant_id}:${row.values.user_id}`)).size, 10);
+  assert.deepEqual(combined[0].identity, {
+    kind: 'primaryKey',
+    values: { tenant_id: 0n, user_id: 0n },
+  });
+
+  const update = buildUpdate({
+    tableName: table.name,
+    columnName: 'label',
+    identity: combined[0].identity,
+    primaryKeyColumns: table.primaryKeyColumns,
+  });
+  runWrite(db, update.sql, ['updated first chunk', ...update.identityParams], { expectedRowsModified: 1 });
+  const deletion = buildDelete({
+    tableName: table.name,
+    identity: combined[7].identity,
+    primaryKeyColumns: table.primaryKeyColumns,
+  });
+  runWrite(db, deletion.sql, deletion.params, { expectedRowsModified: 1 });
+  assert.equal(queryAll(db, "SELECT COUNT(*) AS count FROM memberships WHERE label = 'updated first chunk'")[0].count, 1);
+  assert.equal(queryAll(db, 'SELECT COUNT(*) AS count FROM memberships')[0].count, 11);
   db.close();
 });
 
-test.todo('preserves rowid identity above Number.MAX_SAFE_INTEGER without rounding', async () => {
+test('preserves rowid identity above Number.MAX_SAFE_INTEGER without rounding', async () => {
   const db = await createDatabase();
   db.run('CREATE TABLE large_rowids (value TEXT)');
-  db.run("INSERT INTO large_rowids (rowid, value) VALUES (9007199254740993, 'target')");
+  db.run("INSERT INTO large_rowids (rowid, value) VALUES (9007199254740992, 'neighbor'), (9007199254740993, 'target')");
+  const table = readTableMetadata(db, getSchemaObjects(db))
+    .find((candidate) => candidate.name === 'large_rowids');
+  const query = buildTableSelect({
+    tableName: table.name,
+    columns: table.columns,
+    includeRowid: table.hasRowid,
+    rowidAlias: table.rowidAlias,
+    limit: 10,
+    offset: 0,
+  });
+  const gridRows = queryGridRows(db, { table, query, resultScope: 'large-rowids' });
+  const target = gridRows.find((row) => row.values.value === 'target');
+  const neighbor = gridRows.find((row) => row.values.value === 'neighbor');
 
-  const [row] = queryAll(db, 'SELECT rowid AS identity FROM large_rowids');
-  assert.equal(row.identity, 9007199254740993n);
+  assert.equal(target.identity.value, 9007199254740993n);
+  assert.equal(neighbor.identity.value, 9007199254740992n);
+
+  const update = buildUpdate({
+    tableName: table.name,
+    columnName: 'value',
+    identity: target.identity,
+    primaryKeyColumns: table.primaryKeyColumns,
+    rowidAlias: table.rowidAlias,
+  });
+  runWrite(db, update.sql, ['updated', ...update.identityParams], { expectedRowsModified: 1 });
+  const deletion = buildDelete({
+    tableName: table.name,
+    identity: neighbor.identity,
+    primaryKeyColumns: table.primaryKeyColumns,
+    rowidAlias: table.rowidAlias,
+  });
+  runWrite(db, deletion.sql, deletion.params, { expectedRowsModified: 1 });
+
+  assert.deepEqual(queryAll(db, 'SELECT value FROM large_rowids'), [{ value: 'updated' }]);
+  db.close();
+});
+
+test('keeps hidden row identity separate from colliding displayed columns', async () => {
+  const db = await createDatabase();
+  db.run('CREATE TABLE collisions (rowid TEXT, __database_editor_identity TEXT, value TEXT)');
+  db.run("INSERT INTO collisions (rowid, __database_editor_identity, value) VALUES ('declared', 'displayed', 'target')");
+  const table = readTableMetadata(db, getSchemaObjects(db))
+    .find((candidate) => candidate.name === 'collisions');
+  const query = buildTableSelect({
+    tableName: table.name,
+    columns: table.columns,
+    includeRowid: table.hasRowid,
+    rowidAlias: table.rowidAlias,
+    limit: 10,
+    offset: 0,
+  });
+  const [row] = queryGridRows(db, { table, query, resultScope: 'collisions' });
+
+  assert.equal(table.rowidAlias, '_rowid_');
+  assert.equal(row.values.rowid, 'declared');
+  assert.equal(row.values.__database_editor_identity, 'displayed');
+  assert.equal(row.identity.kind, 'rowid');
+  assert.equal(typeof row.identity.value, 'bigint');
+
+  db.run('CREATE TABLE all_aliases (rowid TEXT, _rowid_ TEXT, oid TEXT, id INTEGER PRIMARY KEY)');
+  const allAliases = readTableMetadata(db, getSchemaObjects(db))
+    .find((candidate) => candidate.name === 'all_aliases');
+  assert.equal(allAliases.rowidAlias, null);
+  assert.deepEqual(allAliases.primaryKeyColumns, ['id']);
+  db.close();
+});
+
+test('assigns result-scoped positional identities to browse-only duplicate rows', async () => {
+  const db = await createDatabase();
+  db.run('CREATE TABLE source (value TEXT)');
+  db.run("INSERT INTO source VALUES ('duplicate'), ('duplicate')");
+  db.run('CREATE VIEW duplicate_view AS SELECT value FROM source');
+  const table = readTableMetadata(db, getSchemaObjects(db))
+    .find((candidate) => candidate.name === 'duplicate_view');
+  const query = buildTableSelect({
+    tableName: table.name,
+    columns: table.columns,
+    includeRowid: false,
+    limit: 10,
+    offset: 0,
+  });
+  const resultRows = queryGridRows(db, { table, query, resultScope: 'duplicate-view:1' });
+
+  assert.deepEqual(resultRows.map((row) => row.values.value), ['duplicate', 'duplicate']);
+  assert.deepEqual(resultRows.map((row) => row.identity), [
+    { kind: 'visiblePosition', resultId: 'duplicate-view:1', position: 0 },
+    { kind: 'visiblePosition', resultId: 'duplicate-view:1', position: 1 },
+  ]);
+  assert.throws(() => buildDelete({
+    tableName: table.name,
+    identity: resultRows[0].identity,
+    primaryKeyColumns: [],
+  }), /browse-only row cannot be edited/i);
   db.close();
 });
 

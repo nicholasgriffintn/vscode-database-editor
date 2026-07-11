@@ -62,6 +62,7 @@ import {
   configureDatabase,
   getSchemaObjects,
   queryAll,
+  queryGridRows,
   readTableMetadata,
   runSqlScript,
   runStatement,
@@ -125,6 +126,7 @@ let editorSettings = normalizeEditorSettings(DEFAULT_EDITOR_SETTINGS);
 let pageSize = editorSettings.defaultPageSize;
 let totalRows = 0;
 let visibleRows = [];
+let rowResultScope = 0;
 let selectedRow = null;
 let selectedCell = null;
 let lastSelectedRowIndex = null;
@@ -1082,6 +1084,7 @@ async function refreshRows() {
     });
     totalRows = rowWindow.effectiveTotalRows;
     page = rowWindow.page;
+    rowResultScope += 1;
     visibleRows = readGridRows(table, {
       limit: rowWindow.limit,
       offset: rowWindow.offset,
@@ -1119,11 +1122,15 @@ function readGridRows(table, { limit, offset }) {
     limit,
     offset,
     includeRowid: table.hasRowid,
+    rowidAlias: table.rowidAlias,
   });
-  return queryAll(db, selectQuery.sql, selectQuery.params, getQueryOptions()).map((row) => ({
-    identity: buildIdentity(table, row),
-    values: row,
-  }));
+  return queryGridRows(db, {
+    table,
+    query: selectQuery,
+    resultScope: rowResultScope,
+    offset,
+    options: getQueryOptions(),
+  });
 }
 
 async function maybeLoadMoreRows() {
@@ -2930,10 +2937,12 @@ async function saveRowDetails(table, row, form, validationSummary) {
         columnName: column.name,
         identity: row.identity,
         primaryKeyColumns: table.primaryKeyColumns,
+        rowidAlias: table.rowidAlias,
       });
       updates.push({
         sql: update.sql,
         params: [parseCellInput(nextValue, column, previousValue), ...update.identityParams],
+        expectedRowsModified: 1,
       });
     }
 
@@ -2975,8 +2984,9 @@ async function updateCell(table, row, column, input, previousValue) {
       columnName: column.name,
       identity: row.identity,
       primaryKeyColumns: table.primaryKeyColumns,
+      rowidAlias: table.rowidAlias,
     });
-    runWrite(db, update.sql, [parsed, ...update.identityParams]);
+    runWrite(db, update.sql, [parsed, ...update.identityParams], { expectedRowsModified: 1 });
     markChanged();
     await refreshRows();
   } catch (error) {
@@ -3060,8 +3070,9 @@ async function deleteRows(rows, { confirm = true } = {}) {
       tableName: table.name,
       identity: row.identity,
       primaryKeyColumns: table.primaryKeyColumns,
+      rowidAlias: table.rowidAlias,
     });
-    return { sql: deletion.sql, params: deletion.params };
+    return { sql: deletion.sql, params: deletion.params, expectedRowsModified: 1 };
   });
 
   try {
@@ -3617,13 +3628,6 @@ function getActiveTable() {
 function getEditableTable() {
   const table = getActiveTable();
   return table?.type === 'table' ? table : null;
-}
-
-function buildIdentity(table, row) {
-  return {
-    rowid: table.hasRowid ? row.__database_editor_rowid : null,
-    primaryKey: Object.fromEntries(table.primaryKeyColumns.map((column) => [column, row[column]])),
-  };
 }
 
 function markChanged() {

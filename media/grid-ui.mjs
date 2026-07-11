@@ -199,10 +199,21 @@ export function getCellClipboardText(value) {
 }
 
 export function getRowSelectionKey(identity) {
+  if (identity?.kind === 'rowid') {
+    return `rowid:${String(identity.value)}`;
+  }
+  if (identity?.kind === 'primaryKey') {
+    const entries = Object.entries(identity.values ?? {})
+      .map(([key, value]) => [key, normalizeSelectionKeyValue(value)]);
+    return `pk:${JSON.stringify(entries)}`;
+  }
+  if (identity?.kind === 'visiblePosition') {
+    return `position:${String(identity.resultId)}:${String(identity.position)}`;
+  }
+
   if (identity?.rowid !== null && identity?.rowid !== undefined) {
     return `rowid:${String(identity.rowid)}`;
   }
-
   const entries = Object.entries(identity?.primaryKey ?? {})
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => [key, normalizeSelectionKeyValue(value)]);

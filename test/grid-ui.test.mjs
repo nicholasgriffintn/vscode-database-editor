@@ -124,7 +124,7 @@ test('row selection keys prefer rowid and fall back to sorted primary keys', () 
   );
 });
 
-test.todo('duplicate browse-only view rows receive distinct visible-position selection keys', () => {
+test('duplicate browse-only view rows receive distinct visible-position selection keys', () => {
   const first = getRowSelectionKey({
     kind: 'visiblePosition',
     resultId: 'release_duplicate_view:1',
@@ -141,7 +141,7 @@ test.todo('duplicate browse-only view rows receive distinct visible-position sel
   assert.match(second, /^position:/);
 });
 
-test.todo('BigInt row identities serialize without colliding with rounded numbers', () => {
+test('BigInt row identities serialize without colliding with rounded numbers', () => {
   const exact = getRowSelectionKey({ kind: 'rowid', value: 9007199254740993n });
   const rounded = getRowSelectionKey({ kind: 'rowid', value: 9007199254740992n });
 

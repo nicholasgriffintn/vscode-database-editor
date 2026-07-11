@@ -12,9 +12,17 @@ export function buildTableSelect({
   limit,
   offset,
   includeRowid = true,
+  rowidAlias = '_rowid_',
 }) {
-  const visibleColumns = columns.map((column) => `${quoteIdentifier(column.name)}`).join(', ');
-  const identityColumn = includeRowid ? 'rowid AS __database_editor_rowid' : null;
+  const visibleColumns = columns
+    .map((column) => `${quoteIdentifier(tableName)}.${quoteIdentifier(column.name)}`)
+    .join(', ');
+  const qualifiedRowid = includeRowid && rowidAlias
+    ? `${quoteIdentifier(tableName)}.${rowidAlias}`
+    : null;
+  const identityColumn = qualifiedRowid
+    ? `${qualifiedRowid} AS "__database_editor_identity"`
+    : null;
   const selectColumns = [identityColumn, visibleColumns].filter(Boolean).join(', ') || '*';
   const params = [];
   const where = buildFilterClause(columns, filter, columnFilters, params);
@@ -22,12 +30,12 @@ export function buildTableSelect({
   if (sortColumn) {
     orderColumns.push(`${quoteIdentifier(sortColumn)} ${sortDirection === 'desc' ? 'DESC' : 'ASC'}`);
   }
-  if (includeRowid) {
-    orderColumns.push('rowid ASC');
+  if (qualifiedRowid) {
+    orderColumns.push(`${qualifiedRowid} ASC`);
   } else {
     const primaryKeyColumns = columns
-      .filter((column) => Number(column.primaryKey) > 0 && column.name !== sortColumn)
-      .sort((left, right) => Number(left.primaryKey) - Number(right.primaryKey));
+      .filter((column) => Number(column.primaryKeyOrder) > 0 && column.name !== sortColumn)
+      .sort((left, right) => Number(left.primaryKeyOrder) - Number(right.primaryKeyOrder));
     orderColumns.push(...primaryKeyColumns.map((column) => `${quoteIdentifier(column.name)} ASC`));
   }
   const order = orderColumns.length > 0 ? ` ORDER BY ${orderColumns.join(', ')}` : '';
@@ -35,6 +43,7 @@ export function buildTableSelect({
   return {
     sql: `SELECT ${selectColumns} FROM ${quoteIdentifier(tableName)}${where}${order} LIMIT ? OFFSET ?`,
     params: [...params, limit, offset],
+    hasIdentityColumn: Boolean(identityColumn),
   };
 }
 
@@ -47,16 +56,16 @@ export function buildTableCount({ tableName, columns, filter, columnFilters = {}
   };
 }
 
-export function buildUpdate({ tableName, columnName, identity, primaryKeyColumns }) {
-  const where = buildIdentityWhere(identity, primaryKeyColumns);
+export function buildUpdate({ tableName, columnName, identity, primaryKeyColumns, rowidAlias = '_rowid_' }) {
+  const where = buildIdentityWhere(identity, primaryKeyColumns, rowidAlias, tableName);
   return {
     sql: `UPDATE ${quoteIdentifier(tableName)} SET ${quoteIdentifier(columnName)} = ? WHERE ${where.sql}`,
     identityParams: where.params,
   };
 }
 
-export function buildDelete({ tableName, identity, primaryKeyColumns }) {
-  const where = buildIdentityWhere(identity, primaryKeyColumns);
+export function buildDelete({ tableName, identity, primaryKeyColumns, rowidAlias = '_rowid_' }) {
+  const where = buildIdentityWhere(identity, primaryKeyColumns, rowidAlias, tableName);
   return {
     sql: `DELETE FROM ${quoteIdentifier(tableName)} WHERE ${where.sql}`,
     params: where.params,
@@ -640,26 +649,40 @@ function serializeSqlLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-function buildIdentityWhere(identity, primaryKeyColumns) {
-  if (identity.rowid !== null && identity.rowid !== undefined) {
+function buildIdentityWhere(identity, primaryKeyColumns, rowidAlias, tableName) {
+  const qualifiedRowid = `${quoteIdentifier(tableName)}.${rowidAlias}`;
+  if (identity?.kind === 'visiblePosition') {
+    throw new Error('This browse-only row cannot be edited because it has no durable database identity.');
+  }
+
+  if (identity?.kind === 'rowid') {
     return {
-      sql: 'rowid = ?',
+      sql: `${qualifiedRowid} = ?`,
+      params: [identity.value],
+    };
+  }
+
+  const primaryKey = identity?.kind === 'primaryKey'
+    ? identity.values
+    : identity?.primaryKey;
+  if (primaryKey && primaryKeyColumns.length > 0) {
+    const params = [];
+    const predicates = primaryKeyColumns.map((column) => {
+      params.push(primaryKey[column]);
+      return `${quoteIdentifier(column)} IS ?`;
+    });
+    return {
+      sql: predicates.join(' AND '),
+      params,
+    };
+  }
+
+  if (identity?.rowid !== null && identity?.rowid !== undefined) {
+    return {
+      sql: `${qualifiedRowid} = ?`,
       params: [identity.rowid],
     };
   }
 
-  const params = [];
-  const predicates = primaryKeyColumns.map((column) => {
-    params.push(identity.primaryKey[column]);
-    return `${quoteIdentifier(column)} IS ?`;
-  });
-
-  if (predicates.length === 0) {
-    throw new Error('This row cannot be edited because it has neither a rowid nor a primary key.');
-  }
-
-  return {
-    sql: predicates.join(' AND '),
-    params,
-  };
+  throw new Error('This row cannot be edited because it has neither a rowid nor a primary key.');
 }
