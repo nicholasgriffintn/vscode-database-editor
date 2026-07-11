@@ -16,6 +16,13 @@ export type SaveBinaryMessage = {
   content: ArrayBuffer;
 };
 
+export type ExportSqlMessage = {
+  type: 'exportSql';
+  fileName: string;
+  revision: number;
+  requestId: string;
+};
+
 export type DatabaseChangedMessage = {
   type: 'databaseChanged';
   data: ArrayBuffer;
@@ -39,6 +46,7 @@ export type WebviewMessage =
   | { type: 'clipboardRead'; requestId: string }
   | { type: 'undo' }
   | { type: 'redo' }
+  | ExportSqlMessage
   | SaveTextMessage
   | SaveBinaryMessage;
 
@@ -56,7 +64,8 @@ export type ExtensionMessage =
   | DatabaseSavedMessage
   | { type: 'databaseSaveFailed'; message: string; revision: number; requestId: string }
   | { type: 'documentStateChanged'; dirty: boolean; revision: number }
-  | { type: 'clipboardText'; requestId: string; text: string };
+  | { type: 'clipboardText'; requestId: string; text: string }
+  | { type: 'sqlExportFinished'; requestId: string; status: 'completed' | 'cancelled' | 'failed'; message?: string };
 
 
 export type IncomingDatabaseChangeDecision = {

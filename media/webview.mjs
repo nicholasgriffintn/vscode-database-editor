@@ -7,6 +7,7 @@ import {
   normalizeEditorSettings,
 } from './editor-settings.mjs';
 import { createElement, clear } from './dom-utils.mjs';
+import { createSqlExportRequest } from './export-workflows.mjs';
 import {
   createRowCountCache,
   createRowCountFilterKey,
@@ -90,7 +91,6 @@ import {
   analyzeSqlScript,
   assertSqlScriptCanExport,
   buildRowCopyContent,
-  buildSqlDump,
   buildDelete,
   buildInsert,
   buildTableSelect,
@@ -160,6 +160,8 @@ let databaseLoadQueue = Promise.resolve();
 let saveRequestCounter = 0;
 let pendingSaveRequestIds = new Set();
 let shouldSaveAfterCompletion = false;
+let sqlExportRequestCounter = 0;
+let activeSqlExportRequestId = null;
 let pinnedColumns = new Set();
 let columnWidths = {};
 
@@ -266,6 +268,8 @@ window.addEventListener('message', async (event) => {
       pendingClipboardReads.delete(message.requestId);
       pending.resolve(message.text ?? '');
     }
+  } else if (message.type === 'sqlExportFinished') {
+    handleSqlExportFinished(message);
   }
 });
 
@@ -3798,35 +3802,27 @@ function exportVisibleCsv() {
 }
 
 function exportSqlDump() {
-  const schema = getSchemaObjects(db).map((row) => row.sql);
-  const dataTables = tables
-    .filter((table) => table.type === 'table')
-    .map((table) => {
-      const columns = table.columns.map((column) => column.name);
-      const select = buildTableSelect({
-        tableName: table.name,
-        columns: table.columns,
-        filter: '',
-        sortColumn: null,
-        sortDirection: 'asc',
-        limit: Number.MAX_SAFE_INTEGER,
-        offset: 0,
-        includeRowid: false,
-      });
+  if (!db || activeSqlExportRequestId) {
+    return;
+  }
+  activeSqlExportRequestId = `sql-export-${++sqlExportRequestCounter}`;
+  vscode.postMessage(createSqlExportRequest({
+    databaseName,
+    revision: currentRevision,
+    requestId: activeSqlExportRequestId,
+  }));
+  updatePager();
+}
 
-      return {
-        name: table.name,
-        columns,
-        rows: queryAll(db, select.sql, select.params, getQueryOptions()),
-      };
-    });
-
-  vscode.postMessage({
-    type: 'saveText',
-    kind: 'sql',
-    fileName: `${safeFileName(databaseName)}.sql`,
-    content: buildSqlDump({ schema, tables: dataTables }),
-  });
+function handleSqlExportFinished(message) {
+  if (message.requestId !== activeSqlExportRequestId) {
+    return;
+  }
+  activeSqlExportRequestId = null;
+  if (message.status === 'failed') {
+    elements.status.textContent = `SQL export failed: ${message.message || 'Unknown error'}`;
+  }
+  updatePager();
 }
 
 async function renderResultTable(result) {
@@ -3895,7 +3891,8 @@ function updatePager() {
   elements.dropColumn.disabled = !editable || table.columns.length === 0;
   elements.dropTable.disabled = !editable;
   elements.exportCsv.disabled = !table;
-  elements.exportSql.disabled = tables.length === 0;
+  elements.exportSql.disabled = tables.length === 0 || Boolean(activeSqlExportRequestId);
+  elements.exportSql.textContent = activeSqlExportRequestId ? 'Exporting SQL…' : 'Export SQL';
 }
 
 function getActiveTable() {

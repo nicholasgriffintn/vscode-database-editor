@@ -6,7 +6,6 @@ import initSqlJs from 'sql.js';
 import {
   analyzeSqlScript,
   buildRowCopyContent,
-  buildSqlDump,
   buildDelete,
   buildInsert,
   buildTableCount,
@@ -326,62 +325,6 @@ test('copies selected rows in viewer-friendly formats', () => {
     buildRowCopyContent({ format: 'markdown', columns: copyColumns, rows }),
     '| id | display name | notes |\n| --- | --- | --- |\n| 1 | Ada Lovelace | first programmer |\n| 2 | Grace Hopper | comma, quote " and pipe \\| |\n| 3 |  | [BLOB 3 bytes] |\n',
   );
-});
-
-test('exports schema and table data as a SQL dump', () => {
-  const dump = buildSqlDump({
-    schema: [
-      'CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT)',
-      'CREATE INDEX people_name ON people (name)',
-    ],
-    tables: [
-      {
-        name: 'people',
-        columns: ['id', 'name'],
-        rows: [
-          { id: 1, name: 'Ada' },
-          { id: 2, name: "Grace O'Connor" },
-          { id: 3, name: null },
-        ],
-      },
-    ],
-  });
-
-  assert.equal(dump, [
-    'BEGIN TRANSACTION;',
-    'CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT);',
-    'CREATE INDEX people_name ON people (name);',
-    'INSERT INTO "people" ("id", "name") VALUES (1, \'Ada\');',
-    'INSERT INTO "people" ("id", "name") VALUES (2, \'Grace O\'\'Connor\');',
-    'INSERT INTO "people" ("id", "name") VALUES (3, NULL);',
-    'COMMIT;',
-    '',
-  ].join('\n'));
-});
-
-test.todo('restores trigger-backed dumps without duplicating trigger-generated rows', async () => {
-  const SQL = await initSqlJs({
-    locateFile: (file) => path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file),
-  });
-  const dump = buildSqlDump({
-    schema: [
-      'CREATE TABLE source (id INTEGER PRIMARY KEY, value TEXT NOT NULL)',
-      'CREATE TABLE audit (source_id INTEGER NOT NULL, value TEXT NOT NULL)',
-      `CREATE TRIGGER source_audit AFTER INSERT ON source BEGIN
-        INSERT INTO audit (source_id, value) VALUES (NEW.id, NEW.value);
-      END`,
-    ],
-    tables: [
-      { name: 'source', columns: ['id', 'value'], rows: [{ id: 1, value: 'created once' }] },
-      { name: 'audit', columns: ['source_id', 'value'], rows: [{ source_id: 1, value: 'created once' }] },
-    ],
-  });
-  const restored = new SQL.Database();
-
-  restored.exec(dump);
-
-  assert.equal(executeRows(restored, 'SELECT COUNT(*) AS count FROM audit')[0].count, 1);
-  restored.close();
 });
 
 test('generated statements work against SQLite', async () => {

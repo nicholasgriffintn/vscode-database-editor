@@ -3,6 +3,7 @@ export function safeFileName(value) {
     .replace(/\.\./g, '')
     .replace(/[\\/:*?"<>|]+/g, '-')
     .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
 
   return cleaned || 'database-export';

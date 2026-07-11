@@ -7,6 +7,7 @@ import {
   createDatabaseSavedMessage,
 } from './custom-editor-protocol';
 import type {
+  ExportSqlMessage,
   ExtensionMessage,
   SaveBinaryMessage,
   SaveTextMessage,
@@ -14,6 +15,12 @@ import type {
 } from './custom-editor-protocol';
 import { readEditorSettings } from './editor-settings';
 import type { EditorSettings } from './editor-settings';
+import {
+  SqlExportCancelledError,
+  createBufferedSqlExportSink,
+  createFileSqlExportSink,
+  exportSqlDatabase,
+} from './sql-export';
 import { SqliteDocument } from './sqlite-document';
 import { createSqliteChatParticipant, createSqliteFollowupProvider } from './sqlite-ai/chat-participant';
 import { SqliteDocumentRegistry } from './sqlite-ai/sqlite-document-registry';
@@ -22,6 +29,7 @@ import { loadSqlJs } from './sqlite-ai/sqljs-host';
 import { createSqliteTools } from './sqlite-ai/tools';
 import { toArrayBuffer } from './utilities/binary';
 import { createCopilotConfigurationReaders } from './utilities/copilot-configuration';
+import { getErrorMessage } from './utilities/errors';
 import { dirname } from './utilities/path';
 import { createEditorWebviewHtml } from './utilities/webview-html';
 
@@ -247,6 +255,9 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
           break;
         case 'saveBinary':
           await this.saveBinaryDocument(document, message);
+          break;
+        case 'exportSql':
+          await this.exportSqlDocument(document, webviewPanel, message);
           break;
         case 'clipboardWrite':
           await vscode.env.clipboard.writeText(message.text);
@@ -520,6 +531,78 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
 
     await vscode.workspace.fs.writeFile(destination, Buffer.from(message.content, 'utf8'));
     await vscode.window.showInformationMessage(`Exported ${message.fileName}.`);
+  }
+
+  private async exportSqlDocument(
+    document: SqliteDocument,
+    webviewPanel: vscode.WebviewPanel,
+    message: ExportSqlMessage,
+  ): Promise<void> {
+    const defaultUri = document.uri.with({ path: `${dirname(document.uri.path)}/${message.fileName}` });
+    const destination = await vscode.window.showSaveDialog({
+      defaultUri,
+      filters: { 'SQL files': ['sql'], 'All files': ['*'] },
+    });
+    if (!destination) {
+      await this.postWebviewMessage(document, webviewPanel, {
+        type: 'sqlExportFinished',
+        requestId: message.requestId,
+        status: 'cancelled',
+      });
+      return;
+    }
+
+    try {
+      const snapshot = await document.enqueueMutation(() => {
+        const current = document.getSnapshot();
+        if (current.revision !== message.revision) {
+          throw new Error('The database changed before the SQL export started. Retry the export from the latest revision.');
+        }
+        return current;
+      });
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: `Exporting ${message.fileName}`,
+        cancellable: true,
+      }, async (progress, cancellation) => {
+        const SQL = await loadSqlJs(this.context.extensionUri);
+        const database = new SQL.Database(snapshot.data);
+        const sink = destination.scheme === 'file'
+          ? createFileSqlExportSink(destination.fsPath)
+          : createBufferedSqlExportSink({
+              maxBytes: 64 * 1024 * 1024,
+              writeFile: async (content) => vscode.workspace.fs.writeFile(destination, content),
+            });
+        try {
+          await exportSqlDatabase(database, sink, {
+            cancellation,
+            onProgress: ({ tableName, rowsExported }) => progress.report({
+              message: `${tableName}: ${rowsExported.toLocaleString()} rows`,
+            }),
+          });
+        } finally {
+          database.close();
+        }
+      });
+      await this.postWebviewMessage(document, webviewPanel, {
+        type: 'sqlExportFinished',
+        requestId: message.requestId,
+        status: 'completed',
+      });
+      await vscode.window.showInformationMessage(`Exported ${message.fileName}.`);
+    } catch (error) {
+      const cancelled = error instanceof SqlExportCancelledError;
+      const failureMessage = cancelled ? undefined : getErrorMessage(error);
+      await this.postWebviewMessage(document, webviewPanel, {
+        type: 'sqlExportFinished',
+        requestId: message.requestId,
+        status: cancelled ? 'cancelled' : 'failed',
+        message: failureMessage,
+      });
+      if (failureMessage) {
+        await vscode.window.showErrorMessage(failureMessage);
+      }
+    }
   }
 
   private async saveBinaryDocument(document: SqliteDocument, message: SaveBinaryMessage): Promise<void> {

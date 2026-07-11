@@ -224,28 +224,6 @@ export function buildRowCopyContent({ format, tableName = 'rows', columns, rows 
   }
 }
 
-export function buildSqlDump({ schema, tables }) {
-  const lines = ['BEGIN TRANSACTION;'];
-
-  for (const statement of schema) {
-    const trimmed = statement.trim();
-    if (trimmed) {
-      lines.push(trimmed.endsWith(';') ? trimmed : `${trimmed};`);
-    }
-  }
-
-  for (const table of tables) {
-    const columnList = table.columns.map(quoteIdentifier).join(', ');
-    for (const row of table.rows) {
-      const values = table.columns.map((column) => serializeSqlLiteral(row[column])).join(', ');
-      lines.push(`INSERT INTO ${quoteIdentifier(table.name)} (${columnList}) VALUES (${values});`);
-    }
-  }
-
-  lines.push('COMMIT;', '');
-  return lines.join('\n');
-}
-
 function normalizeColumnNames(columns) {
   return columns.map((column) => typeof column === 'string' ? column : column.name);
 }
