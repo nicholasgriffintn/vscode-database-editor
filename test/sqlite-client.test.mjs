@@ -70,6 +70,31 @@ test('discovers SQLite objects and table metadata', async () => {
   db.close();
 });
 
+test('structural metadata discovery does not count tables or views', async () => {
+  const db = await createDatabase();
+  db.run('CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT)');
+  db.run('CREATE VIEW named_people AS SELECT name FROM people');
+  const preparedSql = [];
+  const trackingDatabase = new Proxy(db, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return (sql) => {
+          preparedSql.push(sql);
+          return target.prepare(sql);
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+
+  const tables = readTableMetadata(trackingDatabase, getSchemaObjects(trackingDatabase));
+
+  assert.equal(preparedSql.some((sql) => /count\s*\(\s*\*\s*\)/i.test(sql)), false);
+  assert.deepEqual(tables.map((table) => table.rowCount), [null, null]);
+  db.close();
+});
+
 test('configures every database connection with enforced foreign keys', async () => {
   const db = await createDatabase();
   const { configureDatabase } = await import('../media/sqlite-client.mjs');

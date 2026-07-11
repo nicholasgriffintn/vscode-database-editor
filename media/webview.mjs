@@ -8,6 +8,13 @@ import {
 } from './editor-settings.mjs';
 import { createElement, clear } from './dom-utils.mjs';
 import {
+  createRowCountCache,
+  createRowCountFilterKey,
+  formatRowCount,
+  getUnknownCountRowWindow,
+  resolveUnknownCountRows,
+} from './database-metadata.mjs';
+import {
   createConfirmationModel,
   createDiscardDraftModel,
   getDestructiveSqlConfirmationDetails,
@@ -120,6 +127,7 @@ let SQL = null;
 let db = null;
 let databaseName = 'SQLite database';
 let tables = [];
+const rowCountCache = createRowCountCache();
 let activeTableName = null;
 let activeView = 'data';
 let filter = '';
@@ -910,6 +918,7 @@ async function openDatabase(name, data, { dirty = false, revision = 0, resetView
     gridBlobUrls = [];
     db?.close();
     db = nextDatabase;
+    rowCountCache.clear();
     databaseName = name;
     elements.title.textContent = name;
     if (resetViewState) {
@@ -1096,6 +1105,7 @@ async function refreshTables() {
     : tables[0]?.name ?? null;
   renderSidebar();
   renderSchema();
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
   await refreshRows();
 }
 
@@ -1121,10 +1131,25 @@ async function refreshRows() {
   }
 
   try {
-    let actualTotalRows = table.rowCount;
-    if (hasActiveGridFilters()) {
+    if (table.type === 'view') {
+      await refreshUnknownCountRows(table);
+      return;
+    }
+
+    const filterKey = createRowCountFilterKey(filter, columnFilters);
+    const actualTotalRows = rowCountCache.get({
+      revision: currentRevision,
+      objectName: table.name,
+      filterKey,
+      load: () => {
       const countQuery = buildTableCount({ tableName: table.name, columns: table.columns, filter, columnFilters });
-      actualTotalRows = queryAll(db, countQuery.sql, countQuery.params, getQueryOptions())[0]?.count ?? 0;
+        return queryAll(db, countQuery.sql, countQuery.params, getQueryOptions())[0]?.count ?? 0;
+      },
+    });
+    if (!hasActiveGridFilters()) {
+      table.rowCount = actualTotalRows;
+      renderSidebar();
+      renderSchemaGraph();
     }
     if (editorSettings.autoPagination) {
       page = 1;
@@ -1157,6 +1182,28 @@ async function refreshRows() {
     postCopilotSelectionContext();
     scheduleInfiniteScrollCheck();
   }
+}
+
+async function refreshUnknownCountRows(table) {
+  if (editorSettings.autoPagination) {
+    page = 1;
+  }
+  const rowWindow = getUnknownCountRowWindow({
+    page,
+    pageSize,
+    autoPagination: editorSettings.autoPagination,
+    loadedRows: 0,
+    maxRows: editorSettings.maxRows,
+  });
+  rowResultScope += 1;
+  const result = resolveUnknownCountRows(readGridRows(table, rowWindow), rowWindow);
+  visibleRows = result.rows;
+  totalRows = result.totalRows;
+  renderGrid();
+  elements.grid.scrollTop = 0;
+  lastGridScrollTop = 0;
+  isScrollingTowardBottom = true;
+  updatePager();
 }
 
 function hasActiveGridFilters() {
@@ -1238,6 +1285,24 @@ async function loadMoreRows() {
   isLoadingMoreRows = true;
   const startIndex = visibleRows.length;
   try {
+    if (table.type === 'view') {
+      const unknownWindow = getUnknownCountRowWindow({
+        page,
+        pageSize,
+        autoPagination: true,
+        loadedRows: visibleRows.length,
+        maxRows: editorSettings.maxRows,
+      });
+      const result = resolveUnknownCountRows(readGridRows(table, unknownWindow), unknownWindow);
+      visibleRows.push(...result.rows);
+      totalRows = result.totalRows;
+      appendGridRows(startIndex);
+      updatePager();
+      if (result.hasMore) {
+        scheduleInfiniteScrollCheck();
+      }
+      return;
+    }
     const nextRows = readGridRows(table, rowWindow);
     if (nextRows.length === 0) {
       totalRows = visibleRows.length;
@@ -1327,7 +1392,11 @@ function appendObjectSection(label, objects) {
     ].filter(Boolean).join(' ');
     const attributes = interaction.browsable ? { type: 'button', 'data-table': object.name } : {};
     const tagName = interaction.browsable ? 'button' : 'div';
-    const meta = interaction.browsable ? `${object.rowCount} rows` : object.tableName;
+    const meta = interaction.browsable
+      ? formatRowCount(object.rowCount, {
+        loading: object.type === 'table' && object.name === activeTableName && object.rowCount === null,
+      })
+      : object.tableName;
     elements.sidebar.append(createElement(tagName, {
       className,
       title: interaction.title,
@@ -1522,7 +1591,7 @@ function renderSchemaGraphNode(node) {
       'aria-label': `${node.tableType} ${node.tableName}`,
     },
   });
-  group.append(createSvgElement('title', { text: `${node.tableType} ${node.tableName} · ${node.rowCount.toLocaleString()} rows` }));
+  group.append(createSvgElement('title', { text: `${node.tableType} ${node.tableName} · ${formatRowCount(node.rowCount)}` }));
   group.append(createSvgElement('rect', {
     className: 'schema-graph-card',
     attributes: { width: String(node.width), height: String(node.height), rx: '10', ry: '10' },
@@ -1538,7 +1607,7 @@ function renderSchemaGraphNode(node) {
   }));
   group.append(createSvgElement('text', {
     className: 'schema-graph-table-meta',
-    text: node.tableType === 'view' ? 'VIEW' : `${node.rowCount.toLocaleString()} rows`,
+    text: node.tableType === 'view' ? 'VIEW' : formatRowCount(node.rowCount),
     attributes: { x: String(node.width - 12), y: '22', 'text-anchor': 'end' },
   }));
 
@@ -3756,7 +3825,9 @@ function updatePager() {
   });
   elements.pageLabel.textContent = `${pager.label}`;
   elements.pageRowCount.textContent = table
-    ? editorSettings.maxRows > 0 && table.rowCount > totalRows
+    ? table.rowCount === null
+      ? `${formatRowCount(null)} · ${visibleRows.length.toLocaleString()} loaded`
+      : editorSettings.maxRows > 0 && table.rowCount > totalRows
       ? `${totalRows.toLocaleString()} of ${table.rowCount.toLocaleString()} rows shown`
       : `${table.rowCount.toLocaleString()} row${table.rowCount !== 1 ? 's' : ''} total`
     : '';

@@ -58,7 +58,7 @@ function buildNode(table) {
     id: table.name,
     tableName: table.name,
     tableType: table.type ?? 'table',
-    rowCount: Number.isFinite(Number(table.rowCount)) ? Number(table.rowCount) : 0,
+    rowCount: Number.isFinite(table.rowCount) ? Number(table.rowCount) : null,
     columns,
     width: DEFAULT_LAYOUT.nodeWidth,
     height,

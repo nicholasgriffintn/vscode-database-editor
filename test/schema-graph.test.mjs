@@ -11,7 +11,7 @@ function table(name, options = {}) {
   return {
     name,
     type: options.type ?? 'table',
-    rowCount: options.rowCount ?? 0,
+    rowCount: Object.hasOwn(options, 'rowCount') ? options.rowCount : 0,
     columns: options.columns ?? [
       { name: 'id', type: 'INTEGER', nullable: false, primaryKeyOrder: 1, foreignKeyTarget: null },
     ],
@@ -48,6 +48,11 @@ test('schema graph model builds nodes with column metadata', () => {
       ],
     },
   ]);
+});
+
+test('schema graph preserves unknown row counts instead of presenting zero rows', () => {
+  const model = buildSchemaGraphModel([table('expensive_view', { type: 'view', rowCount: null })]);
+  assert.equal(model.nodes[0].rowCount, null);
 });
 
 test('schema graph model builds directed foreign-key edges from child to parent columns', () => {

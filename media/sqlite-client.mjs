@@ -57,7 +57,7 @@ export function readTableMetadata(db, schemaObjects) {
         .map((column) => column.name),
       hasRowid: Boolean(rowidAlias),
       rowidAlias,
-      rowCount: getRowCount(db, row.name, columns),
+      rowCount: null,
       foreignKeys,
       indexes: schemaObjects.filter((object) => object.type === 'index' && object.tableName === row.name),
       triggers: schemaObjects.filter((object) => object.type === 'trigger' && object.tableName === row.name),
