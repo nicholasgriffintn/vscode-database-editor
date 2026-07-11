@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { loadSqlJs } from '../dist/sqlite-ai/sqljs-host.js';
+import { loadSqlJs } from '../dist/sqljs-host.js';
 
 test('a rejected sql.js initialization can be retried', async () => {
   const extensionPath = path.join(process.cwd(), '.tmp', 'sqljs-host-retry');

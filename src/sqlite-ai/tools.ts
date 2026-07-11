@@ -3,13 +3,13 @@ import type * as vscode from 'vscode';
 import { getErrorMessage } from '../utilities/errors';
 import { escapeMarkdown, formatSqlCodeBlock } from '../utilities/markdown';
 import { basenameFromUri } from '../utilities/path';
-import { configureDatabase } from './sqljs-host';
-import type { SqlJsDatabase, SqlJsStatic } from './sqljs-host';
+import { throwIfCancellationRequested as throwIfCancelled } from '../utilities/cancellation';
+import { configureDatabase } from '../sqljs-host';
+import type { SqlJsDatabase, SqlJsStatic } from '../sqljs-host';
 import { createSqlWorkerClient } from './sql-worker-client';
 import type { SqlWorkerClient } from './sql-worker-client';
-import type { OpenDatabaseSummary, SqliteSelectionContext } from './sqlite-document-registry';
-import { isAllowedModification, isReadOnlyQuery } from './sql-safety';
-import { throwIfCancelled } from './tools/query-redaction';
+import type { OpenDatabaseSummary, SqliteSelectionContext } from '../sqlite-document-registry';
+import { isAllowedModification, isReadOnlyQuery } from '../sql-safety';
 import {
   DbContextInput,
   describeDatabaseTarget,

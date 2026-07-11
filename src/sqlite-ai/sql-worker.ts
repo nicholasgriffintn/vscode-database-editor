@@ -1,10 +1,10 @@
 import { parentPort } from 'node:worker_threads';
 
-import { capRows, isReadOnlyQuery, quoteIdentifier } from './sql-safety';
-import { configureDatabase, initializeSqlJs } from './sqljs-host';
-import type { SqlJsStatic } from './sqljs-host';
+import { capRows, isReadOnlyQuery, quoteIdentifier } from '../sql-safety';
+import { configureDatabase, initializeSqlJs } from '../sqljs-host';
+import type { SqlJsStatic } from '../sqljs-host';
 import { getColumns, inferRedactedOutputColumns, compileSensitivePatterns } from './tools/query-redaction';
-import { executeRows, getColumnsInfo, getRowCount, getSchemaObjects } from './tools/schema-helpers';
+import { executeRows, getColumnsInfo, getRowCount, getSchemaObjects } from '../sqlite-schema';
 import { getDatabaseMetadataContext } from './tools/database-context';
 
 export type SqlWorkerRequest = { database: Uint8Array } & (

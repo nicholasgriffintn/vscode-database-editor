@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import initSqlJs from 'sql.js';
 
-import { executeSqlScript, executeSqlStatements } from '../media/sql-workspace.mjs';
+import { executeSqlScript, executeSqlStatements, prepareSqlWorkspaceResults } from '../media/sql-workspace.mjs';
 
 async function createDatabase() {
   const SQL = await initSqlJs({
@@ -92,4 +92,38 @@ test('SQLite parses trigger bodies when stepping multi-statement scripts', async
 
   assert.deepEqual(results.at(-1).values, [['Ada'], ['ADA']]);
   db.close();
+});
+
+test('SQL workspace result summaries keep rendering metadata and user messaging together', () => {
+  const prepared = prepareSqlWorkspaceResults({
+    changed: true,
+    previewLimit: 250,
+    statementCount: 2,
+    results: [
+      { columns: ['id'], values: [[1]], rowCount: 1, truncated: false, statementIndex: 1 },
+      { columns: ['id'], values: [[2]], rowCount: 251, truncated: true, statementIndex: 2 },
+    ],
+  });
+
+  assert.equal(prepared.message, 'at least 252 rows · database modified · 1 result set truncated to 250 retained rows');
+  assert.equal(prepared.kind, 'success');
+  assert.deepEqual(prepared.results.map((result) => ({
+    truncated: result.__truncated,
+    rowCount: result.__rowCount,
+    statementIndex: result.__truncatedStatementIndex,
+  })), [
+    { truncated: false, rowCount: 1, statementIndex: 1 },
+    { truncated: true, rowCount: 251, statementIndex: 2 },
+  ]);
+
+  assert.deepEqual(prepareSqlWorkspaceResults({
+    changed: false,
+    previewLimit: 250,
+    statementCount: 3,
+    results: [],
+  }), {
+    results: [],
+    message: 'Query returned no rows.',
+    kind: 'info',
+  });
 });

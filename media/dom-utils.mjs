@@ -33,6 +33,28 @@ export function createElement(tagName, options = {}) {
   return element;
 }
 
+export function createSvgElement(tagName, options = {}) {
+  const element = document.createElementNS('http://www.w3.org/2000/svg', tagName);
+  if (options.className) {
+    element.setAttribute('class', options.className);
+  }
+  if (options.text !== undefined) {
+    element.textContent = options.text;
+  }
+  if (options.attributes) {
+    for (const [name, value] of Object.entries(options.attributes)) {
+      if (value === undefined || value === null || value === false) {
+        continue;
+      }
+      element.setAttribute(name, String(value));
+    }
+  }
+  if (options.children) {
+    element.replaceChildren(...options.children);
+  }
+  return element;
+}
+
 function applyStyleDeclarations(element, declarations) {
   if (declarations && typeof declarations === 'object') {
     for (const [property, value] of Object.entries(declarations)) {

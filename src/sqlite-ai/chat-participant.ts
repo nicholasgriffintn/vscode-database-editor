@@ -2,7 +2,7 @@ import type * as vscode from 'vscode';
 
 import { getErrorMessage } from '../utilities/errors';
 
-import type { SqliteSelectionContext } from './sqlite-document-registry';
+import type { SqliteSelectionContext } from '../sqlite-document-registry';
 import { SQLITE_TOOL_NAMES, type SqliteToolRegistry } from './tools';
 
 type ChatVscodeApi = Pick<

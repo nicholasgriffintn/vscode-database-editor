@@ -44,6 +44,45 @@ export function getEvictedGridResources(currentResources, retainedResources) {
   return [...currentResources].filter((resource) => !retainedResources.has(resource));
 }
 
+export function getGridRenderPlan({
+  rowCount,
+  rowOffset = 0,
+  scrollTop,
+  viewportHeight,
+  rowHeight,
+  overscan,
+  pinnedRows = new Set(),
+}) {
+  const normalizedRowCount = Math.max(0, Math.floor(Number(rowCount) || 0));
+  const normalizedRowOffset = Math.max(0, Math.floor(Number(rowOffset) || 0));
+  const rowEnd = normalizedRowOffset + normalizedRowCount;
+  const visiblePinnedRows = [...pinnedRows]
+    .filter((rowIndex) => rowIndex >= normalizedRowOffset && rowIndex < rowEnd)
+    .sort((left, right) => left - right);
+  const pinnedIndexes = new Set(visiblePinnedRows.map((rowIndex) => rowIndex - normalizedRowOffset));
+  const window = getGridWindow({
+    rowCount: normalizedRowCount,
+    scrollTop,
+    viewportHeight,
+    rowHeight,
+    overscan,
+    pinnedIndexes,
+  });
+  const pinnedOrder = new Map(window.pinnedRowIndexes.map((rowIndex, index) => [rowIndex, index]));
+  const renderedIndexes = [...window.pinnedRowIndexes, ...window.rowIndexes];
+
+  return {
+    ...window,
+    visiblePinnedRows,
+    rows: renderedIndexes.map((rowIndex) => ({
+      rowIndex,
+      realRowIndex: normalizedRowOffset + rowIndex,
+      isPinned: pinnedIndexes.has(rowIndex),
+      pinnedIndex: pinnedOrder.get(rowIndex),
+    })),
+  };
+}
+
 function getOriginalIndex(unpinnedOrdinal, pinnedIndexes) {
   let index = unpinnedOrdinal;
   for (const pinnedIndex of pinnedIndexes) {

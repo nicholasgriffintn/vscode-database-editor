@@ -7,7 +7,7 @@ import {
   isReadOnlyQuery,
   isSingleStatement,
   jsonSafeValue,
-} from '../dist/sqlite-ai/sql-safety.js';
+} from '../dist/sql-safety.js';
 
 test('host-side read-only guard accepts a single select or safe with query', () => {
   assert.equal(isReadOnlyQuery('SELECT * FROM people'), true);

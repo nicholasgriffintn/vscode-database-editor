@@ -1,10 +1,8 @@
+export { quoteIdentifier } from './utilities/sql';
+
 const WRITE_KEYWORDS = /\b(insert|update|delete|drop|alter|create|replace|vacuum|attach|detach|pragma|reindex)\b/i;
 const MODIFICATION_KEYWORDS = /^(insert|update|delete|replace|create|alter|drop)\b/i;
 const TRANSACTION_KEYWORDS = /^(begin|commit|rollback|savepoint|release)\b/i;
-
-export function quoteIdentifier(identifier: string): string {
-  return `"${String(identifier).replaceAll('"', '""')}"`;
-}
 
 export function isReadOnlyQuery(sql: string): boolean {
   const statements = splitSqlStatements(stripSqlComments(sql));

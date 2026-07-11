@@ -1,23 +1,19 @@
-import type * as vscode from 'vscode';
-
-import type { SqlJsDatabase } from '../sqljs-host';
-import { sqlLiteral } from '../../utilities/sql';
-import { quoteIdentifier } from '../sql-safety';
+import type { SqlJsDatabase, SqlJsStatement } from './sqljs-host';
+import { throwIfCancellationRequested, type CancellationState } from './utilities/cancellation';
+import { quoteIdentifier, sqlLiteral } from './utilities/sql';
 
 export function executeRows(
   db: SqlJsDatabase,
   sql: string,
   rowLimit?: number,
-  token?: vscode.CancellationToken,
+  token?: CancellationState,
   deadline?: number,
 ): Record<string, unknown>[] {
   const statement = db.prepare(sql);
   const rows: Record<string, unknown>[] = [];
   try {
     while (statement.step()) {
-      if (token?.isCancellationRequested) {
-        throw new Error('SQLite query was cancelled.');
-      }
+      throwIfCancellationRequested(token, () => new Error('SQLite query was cancelled.'));
       if (deadline !== undefined && Date.now() >= deadline) {
         throw new Error('SQLite query exceeded its execution time limit.');
       }
@@ -39,6 +35,55 @@ export type SchemaObjectSummary = {
 };
 
 export type SchemaObjectType = 'table' | 'view';
+
+export type SqliteDumpSchemaObject = {
+  type: 'table' | 'index' | 'trigger' | 'view';
+  name: string;
+  tableName: string;
+  sql: string;
+};
+
+export function getDumpSchemaObjects(database: SqlJsDatabase): SqliteDumpSchemaObject[] {
+  const shadowTables = getShadowTableNames(database);
+  const statement = database.prepare(`
+    SELECT type, name, tbl_name, sql
+    FROM sqlite_schema
+    WHERE sql IS NOT NULL
+      AND name NOT LIKE 'sqlite_%'
+      AND type IN ('table', 'index', 'trigger', 'view')
+    ORDER BY rowid
+  `);
+  const objects: SqliteDumpSchemaObject[] = [];
+  try {
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      const name = String(row.name);
+      const tableName = String(row.tbl_name);
+      if (isDumpSchemaObjectType(row.type) && !shadowTables.has(name) && !shadowTables.has(tableName)) {
+        objects.push({ type: row.type, name, tableName, sql: String(row.sql) });
+      }
+    }
+  } finally {
+    statement.free();
+  }
+  return objects;
+}
+
+export function getInsertableColumnNames(database: SqlJsDatabase, tableName: string): string[] {
+  const statement = database.prepare(`PRAGMA table_xinfo(${quoteIdentifier(tableName)})`);
+  const columns: string[] = [];
+  try {
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      if (Number(row.hidden ?? 0) === 0) {
+        columns.push(String(row.name));
+      }
+    }
+  } finally {
+    statement.free();
+  }
+  return columns;
+}
 
 export function getSchemaObjects(db: SqlJsDatabase, objectName?: string): SchemaObjectSummary[] {
   const rows = executeRows(
@@ -106,7 +151,7 @@ export function getTriggers(db: SqlJsDatabase, tableName: string): unknown[] {
 export function getRowCount(
   db: SqlJsDatabase,
   objectName: string,
-  token?: vscode.CancellationToken,
+  token?: CancellationState,
   deadline?: number,
 ): number | null {
   try {
@@ -115,4 +160,27 @@ export function getRowCount(
   } catch {
     return null;
   }
+}
+
+function getShadowTableNames(database: SqlJsDatabase): Set<string> {
+  const names = new Set<string>();
+  let statement: SqlJsStatement | undefined;
+  try {
+    statement = database.prepare('PRAGMA table_list');
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      if (row.type === 'shadow') {
+        names.add(String(row.name));
+      }
+    }
+  } catch {
+    // Older SQLite builds do not expose table_list; their virtual-table handling remains unchanged.
+  } finally {
+    statement?.free();
+  }
+  return names;
+}
+
+function isDumpSchemaObjectType(value: unknown): value is SqliteDumpSchemaObject['type'] {
+  return value === 'table' || value === 'index' || value === 'trigger' || value === 'view';
 }

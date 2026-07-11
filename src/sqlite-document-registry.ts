@@ -1,6 +1,6 @@
 import type * as vscode from 'vscode';
 
-import { basename } from '../utilities/path';
+import { basename } from './utilities/path';
 
 export interface RegistrySqliteDocument {
   readonly uri: vscode.Uri;

@@ -1,13 +1,5 @@
-import type * as vscode from 'vscode';
-
-import type { SqlJsDatabase } from '../sqljs-host';
-import { getColumnsInfo, getSchemaObjects, getViewDefinition, type SchemaObjectType } from './schema-helpers';
-
-export function throwIfCancelled(token?: vscode.CancellationToken): void {
-  if (token?.isCancellationRequested) {
-    throw new Error('SQLite operation was cancelled.');
-  }
-}
+import type { SqlJsDatabase } from '../../sqljs-host';
+import { getColumnsInfo, getSchemaObjects, getViewDefinition, type SchemaObjectType } from '../../sqlite-schema';
 
 export function compileSensitivePatterns(patterns: string[]): RegExp[] {
   return patterns.flatMap((pattern) => {

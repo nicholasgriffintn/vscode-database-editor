@@ -8,10 +8,9 @@ import initSqlJs from 'sql.js';
 
 import {
   SqlExportCancelledError,
-  createBufferedSqlExportSink,
-  createFileSqlExportSink,
   exportSqlDatabase,
 } from '../dist/sql-export.js';
+import { createBufferedSqlExportSink, createFileSqlExportSink } from '../dist/sql-export-sinks.js';
 
 const SQL = await initSqlJs({
   locateFile: (file) => path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file),

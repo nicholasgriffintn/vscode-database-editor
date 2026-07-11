@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { SqliteDocumentRegistry } from '../dist/sqlite-ai/sqlite-document-registry.js';
+import { SqliteDocumentRegistry } from '../dist/sqlite-document-registry.js';
 
 function createUri(value) {
   const parsed = new URL(value);

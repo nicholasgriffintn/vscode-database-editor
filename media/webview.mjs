@@ -6,8 +6,15 @@ import {
   getInstantCommitAction,
   normalizeEditorSettings,
 } from './editor-settings.mjs';
-import { createElement, clear } from './dom-utils.mjs';
-import { createSqlExportRequest } from './export-workflows.mjs';
+import { arraysEqual } from './array-utils.mjs';
+import { createElement, createSvgElement, clear } from './dom-utils.mjs';
+import { getErrorMessage } from './error-utils.mjs';
+import { applyTextEditingShortcut } from './text-control-utils.mjs';
+import {
+  createSqlExportState,
+  getSqlExportUiState,
+  transitionSqlExport,
+} from './export-workflows.mjs';
 import {
   createRowCountCache,
   createRowCountFilterKey,
@@ -68,7 +75,7 @@ import {
 } from './query-history.mjs';
 import { getDirtyStatusText, getSaveButtonState } from './save-state.mjs';
 import { getGridColumnCount, getGridEmptyStateKind } from './grid-empty-state.mjs';
-import { getEvictedGridResources, getGridWindow } from './grid-window.mjs';
+import { getEvictedGridResources, getGridRenderPlan } from './grid-window.mjs';
 import { createGridWindowSpacer } from './grid-window-view.mjs';
 import {
   buildSchemaGraphModel,
@@ -99,6 +106,7 @@ import {
   parseCellInput,
   toCsv,
 } from './sql-utils.mjs';
+import { prepareSqlWorkspaceResults } from './sql-workspace.mjs';
 import {
   buildAddColumn,
   buildCreateTable,
@@ -160,8 +168,7 @@ let databaseLoadQueue = Promise.resolve();
 let saveRequestCounter = 0;
 let pendingSaveRequestIds = new Set();
 let shouldSaveAfterCompletion = false;
-let sqlExportRequestCounter = 0;
-let activeSqlExportRequestId = null;
+let sqlExportState = createSqlExportState();
 let pinnedColumns = new Set();
 let columnWidths = {};
 
@@ -758,7 +765,7 @@ function handleGlobalKeyDown(event) {
       return;
     }
     event.preventDefault();
-    void applyTextEditingShortcut(event.target, textAction);
+    void applyTextEditingShortcut(event.target, textAction, { writeClipboardText, readClipboardText });
     return;
   }
 
@@ -818,78 +825,6 @@ function handleGlobalKeyDown(event) {
     event.preventDefault();
     event.stopPropagation();
     requestSave();
-  }
-}
-
-function isTextControl(target) {
-  const tag = String(target?.tagName ?? '').toLowerCase();
-  return (tag === 'input' || tag === 'textarea') && typeof target.value === 'string';
-}
-
-function replaceTextControlSelection(target, text) {
-  if (!isTextControl(target) || target.readOnly || target.disabled) {
-    return;
-  }
-
-  if (document.activeElement === target && document.execCommand('insertText', false, text)) {
-    target.dispatchEvent(new Event('input', { bubbles: true }));
-    return;
-  }
-
-  const start = target.selectionStart ?? target.value.length;
-  const end = target.selectionEnd ?? start;
-  if (typeof target.setRangeText === 'function') {
-    target.setRangeText(text, start, end, 'end');
-  } else {
-    target.value = `${target.value.slice(0, start)}${text}${target.value.slice(end)}`;
-    const nextCursor = start + text.length;
-    target.setSelectionRange?.(nextCursor, nextCursor);
-  }
-  target.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-function deleteTextControlSelection(target) {
-  if (!isTextControl(target) || target.readOnly || target.disabled) {
-    return;
-  }
-
-  if (document.activeElement === target && document.execCommand('delete')) {
-    target.dispatchEvent(new Event('input', { bubbles: true }));
-    return;
-  }
-
-  replaceTextControlSelection(target, '');
-}
-
-function getSelectedTextInControl(target) {
-  if (!isTextControl(target)) {
-    return '';
-  }
-  const start = target.selectionStart ?? 0;
-  const end = target.selectionEnd ?? start;
-  return target.value.slice(start, end);
-}
-
-async function applyTextEditingShortcut(target, action) {
-  if (!isTextControl(target)) {
-    return;
-  }
-
-  switch (action) {
-    case 'selectAll':
-      target.select?.();
-      break;
-    case 'copy':
-      await writeClipboardText(getSelectedTextInControl(target));
-      break;
-    case 'cut': {
-      await writeClipboardText(getSelectedTextInControl(target));
-      deleteTextControlSelection(target);
-      break;
-    }
-    case 'paste':
-      replaceTextControlSelection(target, await readClipboardText());
-      break;
   }
 }
 
@@ -1704,28 +1639,6 @@ function buildSchemaGraphEdgeTitle(edge) {
   ].filter(Boolean).join(' · ');
 }
 
-function createSvgElement(tagName, options = {}) {
-  const element = document.createElementNS('http://www.w3.org/2000/svg', tagName);
-  if (options.className) {
-    element.setAttribute('class', options.className);
-  }
-  if (options.text !== undefined) {
-    element.textContent = options.text;
-  }
-  if (options.attributes) {
-    for (const [name, value] of Object.entries(options.attributes)) {
-      if (value === undefined || value === null || value === false) {
-        continue;
-      }
-      element.setAttribute(name, String(value));
-    }
-  }
-  if (options.children) {
-    element.replaceChildren(...options.children);
-  }
-  return element;
-}
-
 function fitSchemaGraph() {
   elements.schemaGraph.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
 }
@@ -1879,18 +1792,12 @@ function renderGrid({ bodyOnly = false } = {}) {
   const tbody = createElement('tbody');
 
   const visibleRowOffset = getVisibleRowOffset();
-  const visibleRowEnd = visibleRowOffset + visibleRows.length;
-  const visiblePinnedRows = [...pinnedRows]
-    .filter((rowIndex) => rowIndex >= visibleRowOffset && rowIndex < visibleRowEnd)
-    .sort((left, right) => left - right);
-  const visiblePinnedRowIndexes = new Map(
-    visiblePinnedRows.map((rowIndex, pinnedIndex) => [rowIndex, pinnedIndex]),
-  );
-  const gridWindow = getGridWindow({
+  const gridWindow = getGridRenderPlan({
     rowCount: visibleRows.length,
+    rowOffset: visibleRowOffset,
     scrollTop: elements.grid.scrollTop,
     viewportHeight: elements.grid.clientHeight,
-    pinnedIndexes: new Set(visiblePinnedRows.map((rowIndex) => rowIndex - visibleRowOffset)),
+    pinnedRows,
   });
 
   if (visibleRows.length === 0) {
@@ -1905,19 +1812,17 @@ function renderGrid({ bodyOnly = false } = {}) {
     }));
   }
 
-  const renderedRowIndexes = [...gridWindow.pinnedRowIndexes, ...gridWindow.rowIndexes];
-  for (let renderIndex = 0; renderIndex < renderedRowIndexes.length; renderIndex += 1) {
+  for (let renderIndex = 0; renderIndex < gridWindow.rows.length; renderIndex += 1) {
     if (renderIndex === gridWindow.pinnedRowIndexes.length && gridWindow.topSpacerHeight > 0) {
       tbody.append(createGridWindowSpacer({ columnCount, height: gridWindow.topSpacerHeight }));
     }
-    const rowIndex = renderedRowIndexes[renderIndex];
+    const rowPlan = gridWindow.rows[renderIndex];
+    const { rowIndex, realRowIndex, isPinned: isRowPinned } = rowPlan;
     const row = visibleRows[rowIndex];
-    const realRowIndex = visibleRowOffset + rowIndex;
-    const isRowPinned = pinnedRows.has(realRowIndex);
     const rowSelectionKey = getRowSelectionKey(row.identity);
     const isRowSelectedForBatch = selectedRowKeys.has(rowSelectionKey);
     const pinnedRowOffset = isRowPinned
-      ? getPinnedRowOffset({ pinnedIndex: visiblePinnedRowIndexes.get(realRowIndex) })
+      ? getPinnedRowOffset({ pinnedIndex: rowPlan.pinnedIndex })
       : undefined;
     const tr = createElement('tr', {
       className: [
@@ -3679,13 +3584,6 @@ function renderQueryHistory(select = elements.queryHistorySelect) {
   select.disabled = queryHistory.length === 0;
 }
 
-function arraysEqual(left, right) {
-  if (left.length !== right.length) {
-    return false;
-  }
-  return left.every((item, index) => item === right[index]);
-}
-
 function getQueryResultPreviewLimit() {
   return editorSettings.maxRows > 0 && editorSettings.maxRows < QUERY_RESULT_PREVIEW_LIMIT
     ? editorSettings.maxRows
@@ -3736,38 +3634,18 @@ async function runSqlWorkspace() {
       await refreshTables();
     }
 
-    let rowCount = 0;
-    let truncatedStatements = 0;
-
-    for (const [index, result] of results.entries()) {
-      rowCount += result.rowCount;
-      result.__truncated = result.truncated;
-      result.__rowCount = result.rowCount;
-      result.__truncatedStatementIndex = result.statementIndex ?? index + 1;
-      if (result.truncated) {
-        truncatedStatements += 1;
-      }
-    }
-
-    if (results.length > 0) {
-      const truncationMessage = truncatedStatements
-        ? ` · ${truncatedStatements.toLocaleString()} result set${truncatedStatements === 1 ? '' : 's'} truncated to ${previewLimit.toLocaleString()} retained rows`
-        : '';
-      const countLabel = `${truncatedStatements ? 'at least ' : ''}${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'}`;
-      setQueryMessage(changed
-        ? `${countLabel} · database modified${truncationMessage}`
-        : `${countLabel}${truncationMessage}`,
-      changed ? 'success' : 'info');
-      for (const result of results) {
+    const prepared = prepareSqlWorkspaceResults({
+      results,
+      changed,
+      previewLimit,
+      statementCount: analysis.statementCount,
+    });
+    setQueryMessage(prepared.message, prepared.kind);
+    if (prepared.results.length > 0) {
+      for (const result of prepared.results) {
         elements.queryOutput.append(await renderResultTable(result));
       }
-      return;
     }
-
-    setQueryMessage(changed
-      ? `Executed ${analysis.statementCount.toLocaleString()} statement${analysis.statementCount === 1 ? '' : 's'} · database modified`
-      : 'Query returned no rows.',
-    changed ? 'success' : 'info');
   } catch (error) {
     const message = getErrorMessage(error);
     if (error?.databaseChanged) {
@@ -3802,25 +3680,33 @@ function exportVisibleCsv() {
 }
 
 function exportSqlDump() {
-  if (!db || activeSqlExportRequestId) {
+  if (!db) {
     return;
   }
-  activeSqlExportRequestId = `sql-export-${++sqlExportRequestCounter}`;
-  vscode.postMessage(createSqlExportRequest({
+  const transition = transitionSqlExport(sqlExportState, {
+    type: 'start',
     databaseName,
     revision: currentRevision,
-    requestId: activeSqlExportRequestId,
-  }));
+  });
+  sqlExportState = transition.state;
+  if (!transition.handled) {
+    return;
+  }
+  vscode.postMessage(transition.message);
   updatePager();
 }
 
 function handleSqlExportFinished(message) {
-  if (message.requestId !== activeSqlExportRequestId) {
+  const transition = transitionSqlExport(sqlExportState, {
+    ...message,
+    type: 'finish',
+  });
+  if (!transition.handled) {
     return;
   }
-  activeSqlExportRequestId = null;
-  if (message.status === 'failed') {
-    elements.status.textContent = `SQL export failed: ${message.message || 'Unknown error'}`;
+  sqlExportState = transition.state;
+  if (transition.statusMessage) {
+    elements.status.textContent = transition.statusMessage;
   }
   updatePager();
 }
@@ -3891,8 +3777,9 @@ function updatePager() {
   elements.dropColumn.disabled = !editable || table.columns.length === 0;
   elements.dropTable.disabled = !editable;
   elements.exportCsv.disabled = !table;
-  elements.exportSql.disabled = tables.length === 0 || Boolean(activeSqlExportRequestId);
-  elements.exportSql.textContent = activeSqlExportRequestId ? 'Exporting SQL…' : 'Export SQL';
+  const sqlExportUi = getSqlExportUiState(sqlExportState, { hasTables: tables.length > 0 });
+  elements.exportSql.disabled = sqlExportUi.disabled;
+  elements.exportSql.textContent = sqlExportUi.label;
 }
 
 function getActiveTable() {
@@ -3923,8 +3810,4 @@ function reportError(error) {
   const message = getErrorMessage(error);
   elements.status.textContent = message;
   vscode.postMessage({ type: 'error', message });
-}
-
-function getErrorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
 }

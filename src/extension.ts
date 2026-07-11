@@ -17,15 +17,14 @@ import { readEditorSettings } from './editor-settings';
 import type { EditorSettings } from './editor-settings';
 import {
   SqlExportCancelledError,
-  createBufferedSqlExportSink,
-  createFileSqlExportSink,
   exportSqlDatabase,
 } from './sql-export';
+import { createBufferedSqlExportSink, createFileSqlExportSink } from './sql-export-sinks';
 import { SqliteDocument } from './sqlite-document';
 import { createSqliteChatParticipant, createSqliteFollowupProvider } from './sqlite-ai/chat-participant';
-import { SqliteDocumentRegistry } from './sqlite-ai/sqlite-document-registry';
-import type { SqliteSelectionContext, SqliteSelectionUpdate } from './sqlite-ai/sqlite-document-registry';
-import { loadSqlJs } from './sqlite-ai/sqljs-host';
+import { SqliteDocumentRegistry } from './sqlite-document-registry';
+import type { SqliteSelectionContext, SqliteSelectionUpdate } from './sqlite-document-registry';
+import { loadSqlJs } from './sqljs-host';
 import { createSqliteTools } from './sqlite-ai/tools';
 import { toArrayBuffer } from './utilities/binary';
 import { createCopilotConfigurationReaders } from './utilities/copilot-configuration';

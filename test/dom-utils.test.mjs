@@ -30,9 +30,14 @@ globalThis.document = {
   createElement(tagName) {
     return new FakeElement(tagName);
   },
+  createElementNS(namespace, tagName) {
+    const element = new FakeElement(tagName);
+    element.namespace = namespace;
+    return element;
+  },
 };
 
-const { createElement } = await import('../media/dom-utils.mjs');
+const { createElement, createSvgElement } = await import('../media/dom-utils.mjs');
 
 test('createElement applies style declarations without setting a style attribute', () => {
   const element = createElement('td', {
@@ -57,4 +62,18 @@ test('createElement applies object style declarations used by virtual grid geome
   assert.equal(element.attributes.has('style'), false);
   assert.equal(element.style.declarations.get('height'), '18240px');
   assert.equal(element.style.declarations.get('pointer-events'), 'none');
+});
+
+test('createSvgElement applies SVG attributes and children through the shared DOM utility', () => {
+  const title = createSvgElement('title', { text: 'Relationship' });
+  const path = createSvgElement('path', {
+    className: 'edge',
+    attributes: { d: 'M 0 0 L 10 10', hidden: false },
+    children: [title],
+  });
+
+  assert.equal(path.namespace, 'http://www.w3.org/2000/svg');
+  assert.equal(path.attributes.get('class'), 'edge');
+  assert.equal(path.attributes.get('d'), 'M 0 0 L 10 10');
+  assert.deepEqual(path.children, [title]);
 });

@@ -1,6 +1,6 @@
 import type { EditorSettings } from './editor-settings';
 import { getErrorMessage } from './utilities/errors';
-import type { SqliteSelectionUpdate } from './sqlite-ai/sqlite-document-registry';
+import type { SqliteSelectionUpdate } from './sqlite-document-registry';
 
 export type SaveTextMessage = {
   type: 'saveText';

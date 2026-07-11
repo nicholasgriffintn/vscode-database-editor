@@ -9,7 +9,12 @@ import { buildContentSecurityPolicy, escapeHtmlAttribute } from '../dist/utiliti
 import { escapeMarkdown, formatSqlCodeBlock } from '../dist/utilities/markdown.js';
 import { createNonce } from '../dist/utilities/nonce.js';
 import { basename, basenameFromUri, dirname } from '../dist/utilities/path.js';
-import { sqlLiteral } from '../dist/utilities/sql.js';
+import {
+  quoteIdentifier,
+  serializeSqlLiteral,
+  sqlLiteral,
+  terminateSqlStatement,
+} from '../dist/utilities/sql.js';
 
 test('binary conversion returns an independent exact ArrayBuffer', () => {
   const source = new Uint8Array([1, 2, 3]);
@@ -56,6 +61,10 @@ test('shared formatting and error utilities preserve SQL and escape display text
   assert.equal(getErrorMessage(new Error('failure')), 'failure');
   assert.equal(getErrorMessage('failure'), 'failure');
   assert.equal(sqlLiteral("Ada's"), "'Ada''s'");
+  assert.equal(quoteIdentifier('has " quote'), '"has "" quote"');
+  assert.equal(serializeSqlLiteral(new Uint8Array([0, 255])), "X'00ff'");
+  assert.equal(serializeSqlLiteral(9007199254740993n), '9007199254740993');
+  assert.equal(terminateSqlStatement(' CREATE TABLE values_table (value TEXT) '), 'CREATE TABLE values_table (value TEXT);');
   assert.equal(escapeMarkdown('a*b_[c]'), 'a\\*b\\_\\[c\\]');
   assert.equal(formatSqlCodeBlock(' SELECT 1; '), '```sql\nSELECT 1;\n```');
   assert.equal(formatSqlCodeBlock('SELECT `value`;'), '```sql\nSELECT `value`;\n```');
@@ -104,7 +113,7 @@ test('consumers import shared utilities instead of defining duplicate helpers in
   const [extension, tools, registry, protocol, chatParticipant] = await Promise.all([
     readFile(new URL('../src/extension.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/sqlite-ai/tools.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/sqlite-ai/sqlite-document-registry.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/sqlite-document-registry.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/custom-editor-protocol.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/sqlite-ai/chat-participant.ts', import.meta.url), 'utf8'),
   ]);

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getEvictedGridResources, getGridWindow } from '../media/grid-window.mjs';
+import { getEvictedGridResources, getGridRenderPlan, getGridWindow } from '../media/grid-window.mjs';
 
 test('50k logical rows retain a bounded bidirectional window with stable spacer geometry', () => {
   const middle = getGridWindow({
@@ -42,4 +42,23 @@ test('grid resource eviction keeps retained BLOB URLs and removes only evicted r
     getEvictedGridResources(new Set([evicted, retained]), new Set([retained])),
     [evicted],
   );
+});
+
+test('grid render plans keep absolute pins separate from window positions', () => {
+  const plan = getGridRenderPlan({
+    rowCount: 100,
+    rowOffset: 500,
+    scrollTop: 40 * 38,
+    viewportHeight: 380,
+    pinnedRows: new Set([499, 502, 550, 700]),
+    overscan: 2,
+  });
+
+  assert.deepEqual(plan.visiblePinnedRows, [502, 550]);
+  assert.deepEqual(plan.rows.slice(0, 2), [
+    { rowIndex: 2, realRowIndex: 502, isPinned: true, pinnedIndex: 0 },
+    { rowIndex: 50, realRowIndex: 550, isPinned: true, pinnedIndex: 1 },
+  ]);
+  assert.equal(new Set(plan.rows.map((row) => row.rowIndex)).size, plan.rows.length);
+  assert.equal(plan.rows.some((row) => row.realRowIndex < 500 || row.realRowIndex >= 600), false);
 });

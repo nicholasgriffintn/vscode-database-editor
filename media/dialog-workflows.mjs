@@ -1,3 +1,5 @@
+import { getErrorMessage } from './error-utils.mjs';
+
 export function createConfirmationModel({
   kind,
   tableName,
@@ -108,13 +110,13 @@ export async function runDialogMutation({ submitButton, errorRegion, operation }
   try {
     const result = await operation();
     if (result?.ok === false) {
-      const error = normalizeError(result.error);
+      const error = getErrorMessage(result.error);
       renderDialogError(errorRegion, error);
       return { ok: false, error };
     }
     return { ok: true, value: result };
   } catch (error) {
-    const message = normalizeError(error);
+    const message = getErrorMessage(error);
     renderDialogError(errorRegion, message);
     return { ok: false, error: message };
   } finally {
@@ -191,11 +193,4 @@ function renderDialogError(region, message) {
   }
   region.textContent = message;
   region.classList?.toggle?.('hidden', !message);
-}
-
-function normalizeError(error) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error ?? 'The operation failed.');
 }

@@ -2,9 +2,9 @@ import type * as vscode from 'vscode';
 
 import { escapeMarkdown } from '../../utilities/markdown';
 import { basenameFromUri } from '../../utilities/path';
-import type { SqlJsDatabase } from '../sqljs-host';
-import { quoteIdentifier } from '../sql-safety';
-import type { SqliteSelectionContext } from '../sqlite-document-registry';
+import type { SqlJsDatabase } from '../../sqljs-host';
+import { quoteIdentifier } from '../../sql-safety';
+import type { SqliteSelectionContext } from '../../sqlite-document-registry';
 import {
   executeRows,
   getColumnsInfo,
@@ -12,7 +12,7 @@ import {
   getRowCount,
   getSchemaObjects,
   getTriggers,
-} from './schema-helpers';
+} from '../../sqlite-schema';
 
 export type DbContextInput = {
   databaseUri?: string;
