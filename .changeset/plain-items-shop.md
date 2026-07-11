@@ -4,9 +4,9 @@
 
 test: cover v1 data-safety regressions
 
-- Expanded scripts/create-fixture.mjs with release-regression cases for:
+- Expanded the generated SQLite fixture with general-purpose people, teams, projects, memberships, account, archive, and import schemas covering:
   - Foreign-key update cascade, delete cascade, and delete restriction
-  - Hidden-rowid alias collisions and declared rowid
+  - Hidden-rowid alias collisions and declared rowid columns
   - Rowids above Number.MAX_SAFE_INTEGER
   - Composite-primary-key WITHOUT ROWID pagination
   - Virtual and stored generated columns
@@ -14,9 +14,9 @@ test: cover v1 data-safety regressions
   - Persisted and nested sensitive-column views
   - Trigger-backed audit data
   - Incomplete transaction scenarios
-  - Unique/constraint failures
+  - Unique and constraint failures
+- Added reusable fixture standards that validate these invariants whenever the fixture is generated.
 - Extracted host/webview protocol types into src/custom-editor-protocol.ts.
 - Added pure revision-aware save-acknowledgement decisions.
 - Updated src/extension.ts to use the extracted protocol and message helpers.
-- Added test/custom-editor-protocol.test.mjs.
-- Recorded the known Phase 1 blockers as 15 executable node:test TODO regressions across the SQLite client, SQL utilities, grid identity, and Copilot view lineage tests.
+- Added regression coverage across the SQLite client, SQL utilities, grid identity, fixture standards, and Copilot view lineage tests.

@@ -127,12 +127,12 @@ test('row selection keys prefer rowid and fall back to sorted primary keys', () 
 test('duplicate browse-only view rows receive distinct visible-position selection keys', () => {
   const first = getRowSelectionKey({
     kind: 'visiblePosition',
-    resultId: 'release_duplicate_view:1',
+    resultId: 'query_event_categories:1',
     position: 0,
   });
   const second = getRowSelectionKey({
     kind: 'visiblePosition',
-    resultId: 'release_duplicate_view:1',
+    resultId: 'query_event_categories:1',
     position: 1,
   });
 

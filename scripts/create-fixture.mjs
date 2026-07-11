@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import initSqlJs from 'sql.js';
+import { assertFixtureStandards } from './fixture-standards.mjs';
 
 function crc32(bytes) {
   let crc = 0xffffffff;
@@ -79,11 +80,13 @@ db.run(`
 db.run(`
   CREATE TABLE people (
     id INTEGER PRIMARY KEY,
-    team_id INTEGER REFERENCES teams(id),
+    team_id INTEGER REFERENCES teams(id) ON UPDATE CASCADE ON DELETE RESTRICT,
     name TEXT NOT NULL,
     score REAL,
     active INTEGER NOT NULL DEFAULT 1,
-    notes TEXT
+    notes TEXT,
+    normalized_name TEXT GENERATED ALWAYS AS (lower(trim(name))) VIRTUAL,
+    name_length INTEGER GENERATED ALWAYS AS (length(name)) STORED
   )
 `);
 db.run('CREATE INDEX people_name ON people (name)');
@@ -93,6 +96,19 @@ db.run(`
   WHEN NEW.name = ''
   BEGIN
     SELECT RAISE(ABORT, 'name required');
+  END
+`);
+db.run(`
+  CREATE TABLE people_audit_log (
+    people_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    name TEXT NOT NULL
+  );
+  CREATE TRIGGER people_audit_insert
+  AFTER INSERT ON people
+  BEGIN
+    INSERT INTO people_audit_log (people_id, action, name)
+    VALUES (NEW.id, 'insert', NEW.name);
   END
 `);
 db.run(`
@@ -122,7 +138,15 @@ db.run(`
 `);
 db.run('CREATE INDEX event_log_people ON event_log (people_id)');
 
-db.run('INSERT INTO teams (name) VALUES (?), (?)', ['Engineering', 'Data']);
+db.run('INSERT INTO teams (name) VALUES (?), (?), (?)', ['Engineering', 'Data', 'Operations']);
+db.run(`
+  CREATE TABLE team_projects (
+    id INTEGER PRIMARY KEY,
+    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    name TEXT NOT NULL
+  )
+`);
+db.run('INSERT INTO team_projects (team_id, name) VALUES (?, ?)', [3, 'Infrastructure migration']);
 db.run(
   'INSERT INTO people (team_id, name, score, active, notes) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)',
   [
@@ -237,113 +261,64 @@ for (let index = 1; index <= 500; index++) {
   );
 }
 
-// v1 release-regression objects. Keep these cases in one generated fixture so
-// manual validation and later integration tests exercise the same edge cases.
+// General-purpose edge-case objects. These stay representative of ordinary
+// application schemas while covering editor safety invariants that cannot be
+// expressed naturally by the core people, teams, and event_log tables.
 db.run(`
-  CREATE TABLE release_parents (
+  CREATE TABLE imported_records (
     id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE
+    __database_editor_identity TEXT NOT NULL,
+    value TEXT NOT NULL
   );
-  CREATE TABLE release_children (
-    id INTEGER PRIMARY KEY,
-    parent_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    FOREIGN KEY (parent_id) REFERENCES release_parents(id)
-      ON UPDATE CASCADE
-      ON DELETE RESTRICT
-  );
-  CREATE TABLE release_cascade_children (
-    id INTEGER PRIMARY KEY,
-    parent_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    FOREIGN KEY (parent_id) REFERENCES release_parents(id)
-      ON DELETE CASCADE
-  );
-  INSERT INTO release_parents (id, name) VALUES (10, 'restricted parent');
-  INSERT INTO release_parents (id, name) VALUES (20, 'cascade parent');
-  INSERT INTO release_children (parent_id, name) VALUES (10, 'restricted child');
-  INSERT INTO release_cascade_children (parent_id, name) VALUES (20, 'cascade child');
+  INSERT INTO imported_records (__database_editor_identity, value)
+  VALUES ('displayed identity', 'imported value');
 
-  CREATE TABLE release_alias_collision (
-    id INTEGER PRIMARY KEY,
-    __database_editor_rowid TEXT NOT NULL
-  );
-  INSERT INTO release_alias_collision (id, __database_editor_rowid)
-  VALUES (1, 'displayed value');
-
-  CREATE TABLE release_declared_rowid (
+  CREATE TABLE legacy_records (
     rowid TEXT NOT NULL,
     value TEXT NOT NULL
   );
-  INSERT INTO release_declared_rowid (rowid, value)
-  VALUES ('declared rowid', 'target');
+  INSERT INTO legacy_records (rowid, value)
+  VALUES ('declared rowid', 'legacy value');
 
-  CREATE TABLE release_large_rowid (value TEXT NOT NULL);
-  INSERT INTO release_large_rowid (rowid, value)
-  VALUES (9007199254740993, 'above Number.MAX_SAFE_INTEGER');
+  CREATE TABLE archive_entries (value TEXT NOT NULL);
+  INSERT INTO archive_entries (rowid, value) VALUES
+    (9007199254740992, 'first large rowid'),
+    (9007199254740993, 'above Number.MAX_SAFE_INTEGER');
 
-  CREATE TABLE release_memberships (
-    tenant_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    label TEXT NOT NULL,
-    PRIMARY KEY (tenant_id, user_id)
+  CREATE TABLE memberships (
+    organization_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    PRIMARY KEY (organization_id, member_id)
   ) WITHOUT ROWID;
 
-  CREATE TABLE release_generated (
-    id INTEGER PRIMARY KEY,
-    first_name TEXT NOT NULL,
-    last_name TEXT NOT NULL,
-    virtual_name TEXT GENERATED ALWAYS AS (first_name || ' ' || last_name) VIRTUAL,
-    stored_length INTEGER GENERATED ALWAYS AS (length(first_name) + length(last_name)) STORED
-  );
-  INSERT INTO release_generated (first_name, last_name) VALUES ('Ada', 'Lovelace');
+  CREATE VIEW query_event_categories AS
+    SELECT category FROM event_log
+    WHERE category = 'query'
+    ORDER BY id
+    LIMIT 2;
 
-  CREATE TABLE release_duplicate_source (value TEXT NOT NULL);
-  INSERT INTO release_duplicate_source (value) VALUES ('same'), ('same');
-  CREATE VIEW release_duplicate_view AS
-    SELECT value FROM release_duplicate_source;
-
-  CREATE TABLE release_secrets (
+  CREATE TABLE account_credentials (
     id INTEGER PRIMARY KEY,
     password TEXT NOT NULL,
-    public_value TEXT NOT NULL
+    display_name TEXT NOT NULL
   );
-  INSERT INTO release_secrets (password, public_value)
-  VALUES ('fixture-secret', 'safe');
-  CREATE VIEW release_public_secrets AS
-    SELECT id, password AS value, public_value FROM release_secrets;
-  CREATE VIEW release_nested_secrets AS
-    SELECT value AS renamed_value, public_value FROM release_public_secrets;
-
-  CREATE TABLE release_audit_source (
-    id INTEGER PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-  CREATE TABLE release_audit_log (
-    source_id INTEGER NOT NULL,
-    value TEXT NOT NULL
-  );
-  CREATE TRIGGER release_audit_insert
-  AFTER INSERT ON release_audit_source
-  BEGIN
-    INSERT INTO release_audit_log (source_id, value) VALUES (NEW.id, NEW.value);
-  END;
-  INSERT INTO release_audit_source (value) VALUES ('created once');
-
-  CREATE TABLE release_transaction_target (value TEXT NOT NULL);
-  CREATE TABLE release_unique_names (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE
-  );
-  INSERT INTO release_unique_names (name) VALUES ('existing');
+  INSERT INTO account_credentials (password, display_name)
+  VALUES ('fixture-secret', 'Sample account');
+  CREATE VIEW account_export AS
+    SELECT id, password AS value, display_name FROM account_credentials;
+  CREATE VIEW account_export_summary AS
+    SELECT value AS renamed_value, display_name FROM account_export;
 `);
 
 for (let index = 1; index <= 1005; index += 1) {
   db.run(
-    'INSERT INTO release_memberships (tenant_id, user_id, label) VALUES (?, ?, ?)',
-    [Math.ceil(index / 4), ((index - 1) % 4) + 1, `membership ${index}`],
+    'INSERT INTO memberships (organization_id, member_id, role) VALUES (?, ?, ?)',
+    [Math.ceil(index / 4), ((index - 1) % 4) + 1, `member ${index}`],
   );
 }
+
+assertFixtureStandards(db, { requireForeignKeysEnabled: true });
 
 await mkdir(outputDir, { recursive: true });
 await writeFile(outputPath, db.export());
