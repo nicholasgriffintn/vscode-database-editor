@@ -38,3 +38,22 @@ test('dialogs have programmatic names and descriptions', async () => {
     assert.match(source, /aria-describedby/);
   }
 });
+
+test('editor query and schema search inputs are labeled for accessibility', async () => {
+  const sources = await Promise.all([
+    '../media/editor/shell.mjs',
+    '../media/schema/view.mjs',
+  ].map((path) => readFile(new URL(path, import.meta.url), 'utf8')));
+
+  assert.match(sources[0], /'aria-label': 'SQL query editor'/);
+  assert.match(sources[1], /'aria-label': 'Search schema objects'/);
+});
+
+test('keyboard-focusable controls keep visible focus', async () => {
+  const styles = await readFile(new URL('../media/styles.css', import.meta.url), 'utf8');
+
+  assert.match(styles, /\.toolbar-button:focus-visible/);
+  assert.match(styles, /\.icon-button:focus-visible/);
+  assert.match(styles, /\.tab:focus-visible/);
+  assert.match(styles, /\{\n\s*outline: none;/);
+});

@@ -159,7 +159,11 @@ export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) 
     createElement('div', { className: 'schema-body', children: [schemaGraph, schema] }),
   ] });
 
-  const queryInput = createElement('textarea', { className: 'query-input', attributes: { spellcheck: 'false' } });
+  const queryInput = createElement('textarea', { className: 'query-input', attributes: {
+    spellcheck: 'false',
+    placeholder: 'Run SQL against the open database…',
+    'aria-label': 'SQL query editor',
+  } });
   const queryHistorySelect = createElement('select', { className: 'query-history toolbar-select', title: 'Load a previous SQL script', attributes: { 'aria-label': 'Query history' } });
   const queryMessage = createElement('div', { className: 'query-message' });
   const queryOutput = createElement('div', { className: 'query-output' });

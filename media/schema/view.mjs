@@ -15,6 +15,7 @@ export function createSchemaView({ elements, getState, activateSchemaView }) {
     clear(elements.sidebar);
     const search = createElement('input', { className: 'object-search', attributes: {
       type: 'search', placeholder: 'Search objects', value: objectFilter, 'data-object-search': 'true',
+      'aria-label': 'Search schema objects',
     } });
     elements.sidebar.append(createElement('div', { className: 'object-search-wrap', children: [search, elements.objectRefresh] }));
     appendSection('Tables', tables.filter((table) => table.type === 'table'), selectedSchemaObject, objectFilter);
