@@ -126,7 +126,7 @@ export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) 
   const exportCsv = actionButton('Export CSV', 'export-csv', { title: 'Export visible rows as CSV' });
   const importCsv = actionButton('Import CSV', 'import-csv', { title: 'Import CSV rows into the selected table' });
   const exportSql = actionButton('Export SQL', 'export-sql', { title: 'Export database as SQL dump' });
-  const copyRowsFormat = createElement('select', { className: 'copy-format', title: 'Copy selected rows, or visible rows if no rows are selected', attributes: { 'aria-label': 'Copy rows as format' } });
+  const copyRowsFormat = createElement('select', { className: 'copy-format toolbar-select', title: 'Copy selected rows, or visible rows if no rows are selected', attributes: { 'aria-label': 'Copy rows as format' } });
   copyRowsFormat.append(createElement('option', { text: 'Copy rows as…', attributes: { value: '' } }), ...rowCopyFormats.map((format) => createElement('option', { text: format.label, attributes: { value: format.value } })));
   const deleteSelectedRows = actionButton('Delete selected', 'delete-selected-rows', { className: 'toolbar-button danger', title: 'Delete selected rows', disabled: true });
   const grid = createElement('div', { className: 'grid-wrap' });
@@ -160,7 +160,7 @@ export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) 
   ] });
 
   const queryInput = createElement('textarea', { className: 'query-input', attributes: { spellcheck: 'false' } });
-  const queryHistorySelect = createElement('select', { className: 'query-history', title: 'Load a previous SQL script', attributes: { 'aria-label': 'Query history' } });
+  const queryHistorySelect = createElement('select', { className: 'query-history toolbar-select', title: 'Load a previous SQL script', attributes: { 'aria-label': 'Query history' } });
   const queryMessage = createElement('div', { className: 'query-message' });
   const queryOutput = createElement('div', { className: 'query-output' });
   const query = createElement('section', { className: 'query-view hidden', attributes: { id: 'query-panel', role: 'tabpanel', 'aria-labelledby': 'query-tab' }, children: [
