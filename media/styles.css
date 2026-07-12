@@ -986,6 +986,16 @@ tr.pinned-row.multi-selected-row .row-number-cell {
   gap: 8px;
 }
 
+.csv-preview {
+  max-height: 180px;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
 .schema-subtoolbar {
   display: flex;
   align-items: center;

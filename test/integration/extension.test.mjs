@@ -27,11 +27,30 @@ export async function run() {
     await testSaveWithInterveningEdit(api, fileSystem, documentUri, fixtureBytes);
     await testUndoRedoAndRevert(api, documentUri, fixtureBytes);
     await testSchemaIndexIsOneUndoStep(api, documentUri, fixtureBytes);
+    await testCsvImportIsOneUndoStep(api, documentUri, fixtureBytes);
     await testSaveAsAndBackupRestore(api, fileSystem, documentUri, fixtureBytes);
     await testFailedWriteAndDisposal(api, fileSystem, documentUri, fixtureBytes[4]);
   } finally {
     fileSystemRegistration.dispose();
   }
+}
+
+async function testCsvImportIsOneUndoStep(api, documentUri, fixtures) {
+  const before = api.getDocumentSnapshot(documentUri.toString());
+  await applyEdit(api, documentUri, fixtures[6], before.revision, 'Import 2 CSV rows');
+  assert.deepEqual([...api.getDocumentSnapshot(documentUri.toString()).data], [...fixtures[6]]);
+  assert.equal(activeTab()?.isDirty, true);
+
+  await vscode.commands.executeCommand('undo');
+  await waitForRevision(api, documentUri, before.revision + 2);
+  assert.deepEqual([...api.getDocumentSnapshot(documentUri.toString()).data], [...fixtures[2]], 'the entire CSV import should undo in one step');
+
+  await vscode.commands.executeCommand('redo');
+  await waitForRevision(api, documentUri, before.revision + 3);
+  assert.deepEqual([...api.getDocumentSnapshot(documentUri.toString()).data], [...fixtures[6]], 'the entire CSV import should redo in one step');
+
+  await vscode.commands.executeCommand('undo');
+  await waitForRevision(api, documentUri, before.revision + 4);
 }
 
 async function testSchemaIndexIsOneUndoStep(api, documentUri, fixtures) {
@@ -158,8 +177,8 @@ async function testFailedWriteAndDisposal(api, fileSystem, documentUri, savedByt
 }
 
 async function readFixtures(extensionUri) {
-  return Promise.all(Array.from({ length: 6 }, (_, index) => {
-    const name = index === 0 ? 'sample.sqlite' : index === 5 ? 'sample-index.sqlite' : `sample-edit-${index}.sqlite`;
+  return Promise.all(Array.from({ length: 7 }, (_, index) => {
+    const name = index === 0 ? 'sample.sqlite' : index === 5 ? 'sample-index.sqlite' : index === 6 ? 'sample-csv-import.sqlite' : `sample-edit-${index}.sqlite`;
     return vscode.workspace.fs.readFile(vscode.Uri.joinPath(extensionUri, '.tmp', name));
   }));
 }

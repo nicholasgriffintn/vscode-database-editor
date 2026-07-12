@@ -15,6 +15,7 @@ import type {
 } from './custom-editor-protocol';
 import { readEditorSettings } from './editor-settings';
 import type { EditorSettings } from './editor-settings';
+import { readCsvFile } from './csv-file-reader';
 import { createEmptySqliteBytes, createNewDatabase } from './new-database';
 import {
   SqlExportCancelledError,
@@ -283,6 +284,9 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
             text: await vscode.env.clipboard.readText(),
           });
           break;
+        case 'readCsv':
+          await this.readCsvDocument(document, webviewPanel, message.requestId);
+          break;
         case 'undo':
           await vscode.commands.executeCommand('undo');
           break;
@@ -545,6 +549,20 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
 
     await vscode.workspace.fs.writeFile(destination, Buffer.from(message.content, 'utf8'));
     await vscode.window.showInformationMessage(`Exported ${message.fileName}.`);
+  }
+
+  private async readCsvDocument(document: SqliteDocument, webviewPanel: vscode.WebviewPanel, requestId: string): Promise<void> {
+    try {
+      await this.postWebviewMessage(document, webviewPanel, { type: 'csvFileRead', requestId, ...await readCsvFile({
+        documentUri: document.uri,
+        showOpenDialog: vscode.window.showOpenDialog,
+        readFile: vscode.workspace.fs.readFile,
+      }) });
+    } catch (error) {
+      await this.postWebviewMessage(document, webviewPanel, {
+        type: 'csvFileRead', requestId, status: 'failed', message: getErrorMessage(error),
+      });
+    }
   }
 
   private async exportSqlDocument(

@@ -11,6 +11,7 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 - **Open any SQLite file** — Supports `.db`, `.db3`, `.sqlite`, `.sqlite3`, `.sdb`, `.s3db`, and `.gpkg` files
 - **Browse database structure** — Tables, views, indexes, triggers, columns, primary and foreign keys in a clean sidebar
 - **Copilot integration** — Use Copilot Chat to inspect schema, run queries, and analyze tables with privacy-safe context
+- **CSV import** — Preview and explicitly map CSV columns into an existing table with transactional rollback on failure
 - **Paged data grid** — Sort, filter, and paginate through table data with per-column search
 - **Data editing** — Double-click editable cells for inline or modal editing, add rows, and delete one or many selected rows
 - **Image preview** — BLOB columns with PNG/JPEG/GIF/WebP images render as thumbnails inline

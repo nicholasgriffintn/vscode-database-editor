@@ -44,4 +44,11 @@ async function prepareIntegrationFixtures() {
   indexDatabase.run('CREATE UNIQUE INDEX "teams name lookup" ON teams(name DESC)');
   await writeFile(path.join(extensionDevelopmentPath, '.tmp', 'sample-index.sqlite'), indexDatabase.export());
   indexDatabase.close();
+
+  const csvDatabase = new SQL.Database(await readFile(path.join(extensionDevelopmentPath, '.tmp', 'sample-edit-2.sqlite')));
+  csvDatabase.run('BEGIN IMMEDIATE');
+  csvDatabase.run('INSERT INTO teams (name) VALUES (?), (?)', ['CSV integration A', 'CSV integration B']);
+  csvDatabase.run('COMMIT');
+  await writeFile(path.join(extensionDevelopmentPath, '.tmp', 'sample-csv-import.sqlite'), csvDatabase.export());
+  csvDatabase.close();
 }

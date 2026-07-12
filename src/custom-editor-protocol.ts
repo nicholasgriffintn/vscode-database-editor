@@ -44,6 +44,7 @@ export type WebviewMessage =
   | { type: 'error'; message: string }
   | { type: 'clipboardWrite'; text: string }
   | { type: 'clipboardRead'; requestId: string }
+  | { type: 'readCsv'; requestId: string }
   | { type: 'undo' }
   | { type: 'redo' }
   | ExportSqlMessage
@@ -65,6 +66,7 @@ export type ExtensionMessage =
   | { type: 'databaseSaveFailed'; message: string; revision: number; requestId: string }
   | { type: 'documentStateChanged'; dirty: boolean; revision: number }
   | { type: 'clipboardText'; requestId: string; text: string }
+  | { type: 'csvFileRead'; requestId: string; status: 'completed' | 'cancelled' | 'failed'; name?: string; content?: string; message?: string }
   | { type: 'sqlExportFinished'; requestId: string; status: 'completed' | 'cancelled' | 'failed'; message?: string };
 
 
