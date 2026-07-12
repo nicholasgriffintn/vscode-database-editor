@@ -1,9 +1,15 @@
 import { runDialogMutation } from './workflows.mjs';
 import { createElement } from '../utilities/dom.mjs';
 
+let dialogCounter = 0;
+
 export function showFormDialog({ documentRef = document, fallbackFocus, title, description, submitText, fields, onSubmit }) {
   const invoker = documentRef.activeElement;
-  const dialog = createElement('dialog', { className: 'insert-dialog schema-dialog' });
+  const dialogId = `schema-dialog-${++dialogCounter}`;
+  const dialog = createElement('dialog', { className: 'insert-dialog schema-dialog', attributes: {
+    'aria-labelledby': `${dialogId}-title`,
+    'aria-describedby': description ? `${dialogId}-description` : undefined,
+  } });
   const form = createElement('form', { attributes: { method: 'dialog' } });
   const fieldList = createElement('div', { className: 'insert-fields' });
   fieldList.append(...fields.map(createFormField));
@@ -12,8 +18,8 @@ export function showFormDialog({ documentRef = document, fallbackFocus, title, d
   const submit = createElement('button', { className: 'toolbar-button primary', text: submitText, attributes: { type: 'submit' } });
   const errorRegion = createElement('div', { className: 'validation-summary hidden', attributes: { role: 'alert' } });
   form.append(
-    createElement('h2', { text: title }),
-    ...(description ? [createElement('pre', { className: 'csv-preview', text: description })] : []),
+    createElement('h2', { text: title, attributes: { id: `${dialogId}-title` } }),
+    ...(description ? [createElement('pre', { className: 'csv-preview', text: description, attributes: { id: `${dialogId}-description` } })] : []),
     fieldList,
     errorRegion,
     createElement('div', { className: 'dialog-actions', children: [cancel, submit] }),

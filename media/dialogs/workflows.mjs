@@ -142,8 +142,10 @@ export function showConfirmation({ model, invoker, documentRef = document, fallb
     const form = documentRef.createElement('form');
     form.setAttribute('method', 'dialog');
     const title = documentRef.createElement('h2');
+    title.id = 'confirmation-dialog-title';
     title.textContent = model.title;
     const message = documentRef.createElement('p');
+    message.id = 'confirmation-dialog-description';
     message.className = 'confirm-message';
     message.textContent = model.message;
     const actions = documentRef.createElement('div');
@@ -159,6 +161,8 @@ export function showConfirmation({ model, invoker, documentRef = document, fallb
     actions.append(cancel, confirm);
     form.append(title, message, actions);
     dialog.append(form);
+    dialog.setAttribute('aria-labelledby', title.id);
+    dialog.setAttribute('aria-describedby', message.id);
     documentRef.body.append(dialog);
 
     let settled = false;

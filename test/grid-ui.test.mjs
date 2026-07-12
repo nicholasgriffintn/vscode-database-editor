@@ -85,12 +85,12 @@ test('editable table cells select first, then expose double-click edit and copy 
 
 test('views and blob cells do not expose inline editing', () => {
   assert.deepEqual(getCellInteraction({ tableType: 'view', value: 'Ada' }), {
-    disabled: true,
-    title: 'Views are read-only',
+    disabled: false,
+    title: 'Click to select · view is read-only · Ctrl/Cmd+C to copy',
   });
   assert.deepEqual(getCellInteraction({ tableType: 'table', value: new Uint8Array([1, 2]) }), {
-    disabled: true,
-    title: 'BLOB values cannot be edited inline',
+    disabled: false,
+    title: 'Click to select · double-click for details · Ctrl/Cmd+C to copy',
   });
 });
 
@@ -100,8 +100,8 @@ test('generated table columns render as read-only cells', () => {
     column: { name: 'full_name', generated: 'virtual', readOnly: true },
     value: 'Ada Lovelace',
   }), {
-    disabled: true,
-    title: 'Generated columns are read-only',
+    disabled: false,
+    title: 'Click to select · generated column is read-only · Ctrl/Cmd+C to copy',
   });
 });
 

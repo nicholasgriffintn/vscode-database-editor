@@ -1,4 +1,5 @@
 import { createElement } from '../utilities/dom.mjs';
+import { getRovingIndex } from '../utilities/array.mjs';
 import { formatRowCount } from '../database/metadata.mjs';
 import { getPagerState } from '../grid/ui.mjs';
 
@@ -46,20 +47,72 @@ export function createEditorControls({ elements, getState }) {
   return { render };
 }
 
+export function createEditorNavigation({ elements }) {
+  let activeView = 'data';
+  let activeSchemaView = 'graph';
+
+  function setView(view, { focusTab = false } = {}) {
+    if (!['data', 'schema', 'query'].includes(view)) return;
+    activeView = view;
+    for (const tab of elements.tabs) {
+      const active = tab.dataset.view === view;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+      if (active && focusTab) tab.focus();
+    }
+    elements.data.classList.toggle('hidden', view !== 'data');
+    elements.schemaPanel.classList.toggle('hidden', view !== 'schema');
+    elements.query.classList.toggle('hidden', view !== 'query');
+  }
+
+  function setSchemaView(view) {
+    activeSchemaView = view === 'ddl' ? 'ddl' : 'graph';
+    const graphActive = activeSchemaView === 'graph';
+    elements.schemaGraph.classList.toggle('hidden', !graphActive);
+    elements.schema.classList.toggle('hidden', graphActive);
+    elements.schemaGraphButton.classList.toggle('active', graphActive);
+    elements.schemaDdlButton.classList.toggle('active', !graphActive);
+    elements.schemaGraphButton.setAttribute('aria-pressed', String(graphActive));
+    elements.schemaDdlButton.setAttribute('aria-pressed', String(!graphActive));
+    elements.schemaGraphFit.classList.toggle('hidden', !graphActive);
+    elements.schemaGraphLayout.classList.toggle('hidden', !graphActive);
+    elements.schemaGraphSummary.classList.toggle('hidden', !graphActive);
+  }
+
+  function handleTabKeydown(event) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const current = elements.tabs.findIndex((tab) => tab.dataset.view === activeView);
+    const next = getRovingIndex({ key: event.key, currentIndex: current, itemCount: elements.tabs.length });
+    setView(elements.tabs[next].dataset.view, { focusTab: true });
+  }
+
+  for (const tab of elements.tabs) tab.addEventListener('keydown', handleTabKeydown);
+  setView(activeView);
+  setSchemaView(activeSchemaView);
+  return {
+    setSchemaView,
+    setView,
+    get activeSchemaView() { return activeSchemaView; },
+    get activeView() { return activeView; },
+  };
+}
+
 export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) {
   const title = createElement('div', { className: 'title', text: 'Loading SQLite database...' });
-  const status = createElement('div', { className: 'status', text: 'Waiting for file' });
+  const status = createElement('div', { className: 'status', text: 'Waiting for file', attributes: { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' } });
   const databaseWarning = createElement('div', {
     className: 'database-warning hidden',
     attributes: { role: 'status' },
   });
   const saveButton = actionButton('Save', 'save-database', { className: 'toolbar-button primary save-button', title: 'Save database (Ctrl+S / Cmd+S)', disabled: true });
-  const dataTab = tab('Data', 'data', true);
-  const schemaTab = tab('Schema', 'schema');
-  const queryTab = tab('SQL', 'query');
+  const dataTab = tab('Data', 'data', 'data-panel', true);
+  const schemaTab = tab('Schema', 'schema', 'schema-panel');
+  const queryTab = tab('SQL', 'query', 'query-panel');
   const sidebar = createElement('aside', { className: 'sidebar' });
   const objectRefresh = actionButton('↻', 'refresh-objects', { className: 'icon-button object-refresh-button', title: 'Refresh tables, views, indexes, and triggers', disabled: true, ariaLabel: 'Refresh database objects' });
-  const filterInput = createElement('input', { className: 'filter-input', attributes: { type: 'search', placeholder: 'Filter rows' } });
+  const filterInput = createElement('input', { className: 'filter-input', attributes: { type: 'search', placeholder: 'Filter rows', 'aria-label': 'Filter rows' } });
   const dataRefresh = actionButton('Refresh data', 'refresh-data', { title: 'Refresh rows for the selected table or view', disabled: true });
   const pageSizeSelect = createElement('select', { className: 'page-size', children: pageSizes.map((size) => createElement('option', {
     text: `${size.toLocaleString()} rows`, attributes: { value: String(size), selected: size === pageSize ? 'selected' : undefined },
@@ -94,7 +147,7 @@ export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) 
   const schemaGraphFit = actionButton('Fit', 'schema-graph-fit', { title: 'Reset the graph scroll position to the top-left bounds' });
   const schemaGraphLayout = actionButton('Auto layout', 'schema-graph-layout', { title: 'Recompute the schema graph layout' });
   const schemaGraphSummary = createElement('div', { className: 'schema-graph-summary' });
-  const schemaPanel = createElement('section', { className: 'schema-panel hidden', children: [
+  const schemaPanel = createElement('section', { className: 'schema-panel hidden', attributes: { id: 'schema-panel', role: 'tabpanel', 'aria-labelledby': 'schema-tab' }, children: [
     createElement('div', { className: 'schema-header', children: [
       heading('Schema tools', 'Visualize table relationships, manage the selected table, or inspect generated SQLite definitions.'),
       createElement('div', { className: 'schema-toolbar', children: [newTable, renameTable, addColumn, dropColumn, dropTable, createIndex, dropIndex, checkHealth] }),
@@ -110,16 +163,16 @@ export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) 
   const queryHistorySelect = createElement('select', { className: 'query-history', title: 'Load a previous SQL script', attributes: { 'aria-label': 'Query history' } });
   const queryMessage = createElement('div', { className: 'query-message' });
   const queryOutput = createElement('div', { className: 'query-output' });
-  const query = createElement('section', { className: 'query-view hidden', children: [
+  const query = createElement('section', { className: 'query-view hidden', attributes: { id: 'query-panel', role: 'tabpanel', 'aria-labelledby': 'query-tab' }, children: [
     createElement('div', { className: 'query-header', children: [heading('SQL workspace', 'Run SQL statements, inspect result sets, and save database changes when ready.'), createElement('div', { className: 'query-toolbar', children: [queryHistorySelect, actionButton('Run', 'run-query', { className: 'toolbar-button primary' })] })] }),
     createElement('div', { className: 'query-editor', children: [queryInput, queryMessage] }), queryOutput,
   ] });
-  const data = createElement('section', { className: 'data-view', children: [
+  const data = createElement('section', { className: 'data-view', attributes: { id: 'data-panel', role: 'tabpanel', 'aria-labelledby': 'data-tab' }, children: [
     createElement('div', { className: 'toolbar', children: [filterInput, dataRefresh, createElement('span', { className: 'toolbar-spacer' }), exportCsv, importCsv, exportSql, copyRowsFormat, addRow, deleteSelectedRows] }),
     grid, pager,
   ] });
   app.replaceChildren(
-    createElement('header', { className: 'topbar', children: [createElement('div', { className: 'title-block', children: [title, status] }), createElement('nav', { className: 'tabs', children: [dataTab, schemaTab, queryTab] }), saveButton] }),
+    createElement('header', { className: 'topbar', children: [createElement('div', { className: 'title-block', children: [title, status] }), createElement('nav', { className: 'tabs', attributes: { role: 'tablist', 'aria-label': 'Database editor views' }, children: [dataTab, schemaTab, queryTab] }), saveButton] }),
     databaseWarning,
     createElement('main', { className: 'workspace', children: [sidebar, createElement('div', { className: 'content', children: [data, schemaPanel, query] })] }),
   );
@@ -138,8 +191,11 @@ function actionButton(text, action, { className = 'toolbar-button', title, disab
   } });
 }
 
-function tab(text, view, active = false) {
-  return createElement('button', { className: active ? 'tab active' : 'tab', text, attributes: { type: 'button', 'data-view': view } });
+function tab(text, view, panelId, active = false) {
+  return createElement('button', { className: active ? 'tab active' : 'tab', text, attributes: {
+    id: `${view}-tab`, type: 'button', role: 'tab', 'data-view': view, 'aria-controls': panelId,
+    'aria-selected': String(active), tabindex: active ? '0' : '-1',
+  } });
 }
 
 function heading(title, description) {

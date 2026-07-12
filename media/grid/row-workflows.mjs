@@ -61,7 +61,9 @@ export function createRowWorkflows({
     const row = state.visibleRows[rowIndex];
     if (!row) return;
     const absoluteRowNumber = rowIndex + 1 + state.visibleRowOffset;
-    const dialog = createElement('dialog', { className: 'row-dialog' });
+    const dialog = createElement('dialog', { className: 'row-dialog', attributes: {
+      'aria-labelledby': 'row-dialog-title', 'aria-describedby': 'row-dialog-description',
+    } });
     const form = createElement('form', { className: 'row-dialog-form', attributes: { method: 'dialog' } });
     const previous = createElement('button', { className: 'icon-button', text: '<', title: 'Previous row', attributes: { type: 'button', disabled: rowIndex <= 0 ? 'true' : undefined } });
     const next = createElement('button', { className: 'icon-button', text: '>', title: 'Next row', attributes: { type: 'button', disabled: rowIndex >= state.visibleRows.length - 1 ? 'true' : undefined } });
@@ -74,8 +76,9 @@ export function createRowWorkflows({
     const remove = createElement('button', { className: 'toolbar-button danger', text: 'Delete row', attributes: { type: 'button' } });
     form.append(
       createElement('header', { className: 'row-dialog-header', children: [previous, createElement('div', { className: 'row-dialog-title-block', children: [
-        createElement('div', { className: 'row-dialog-kicker', text: table.name }), createElement('div', { className: 'row-dialog-title', text: `Row ${absoluteRowNumber}` }),
+        createElement('div', { className: 'row-dialog-kicker', text: table.name }), createElement('div', { className: 'row-dialog-title', text: `Row ${absoluteRowNumber}`, attributes: { id: 'row-dialog-title' } }),
       ] }), next] }),
+      createElement('p', { className: 'visually-hidden', text: 'Inspect and edit values for this row. Read-only values can still be selected and copied.', attributes: { id: 'row-dialog-description' } }),
       summary, fields,
       createElement('div', { className: 'dialog-actions', children: [remove, createElement('span', { className: 'toolbar-spacer' }), cancel, save] }),
     );
@@ -249,10 +252,16 @@ export function createRowWorkflows({
     const invoker = document.activeElement;
     const table = getState().table;
     if (!table || table.type === 'view') return;
-    const dialog = createElement('dialog', { className: 'insert-dialog' });
+    const dialog = createElement('dialog', { className: 'insert-dialog', attributes: {
+      'aria-labelledby': 'insert-row-dialog-title', 'aria-describedby': 'insert-row-dialog-description',
+    } });
     const form = createElement('form', { attributes: { method: 'dialog' } });
     const fields = createElement('div', { className: 'insert-fields' });
-    form.append(createElement('h2', { text: `Insert row into ${table.name}` }), fields);
+    form.append(
+      createElement('h2', { text: `Insert row into ${table.name}`, attributes: { id: 'insert-row-dialog-title' } }),
+      createElement('p', { className: 'visually-hidden', text: 'Enter values for the new row.', attributes: { id: 'insert-row-dialog-description' } }),
+      fields,
+    );
     for (const column of insertableColumns(table)) fields.append(createElement('label', { className: 'insert-field', children: [
       createElement('span', { text: `${column.name}${column.type ? ` (${column.type})` : ''}` }),
       createElement('input', { attributes: { type: 'text', name: column.name, placeholder: column.defaultValue == null ? '' : `default ${column.defaultValue}` } }),

@@ -31,7 +31,7 @@ import {
   getDirtyStatusText,
   getSaveButtonState,
 } from './editor/save-state.mjs';
-import { createEditorControls, createEditorShell } from './editor/shell.mjs';
+import { createEditorControls, createEditorNavigation, createEditorShell } from './editor/shell.mjs';
 import { createClipboardBridge } from './editor/clipboard.mjs';
 import { createGridView } from './grid/view.mjs';
 import { createGridSelection } from './grid/selection.mjs';
@@ -80,7 +80,6 @@ let databaseName = 'SQLite database';
 let tables = [];
 const rowCountCache = createRowCountCache();
 let metadataLoadGeneration = 0;
-let activeView = 'data';
 let filter = '';
 let columnFilters = {};
 let objectFilter = '';
@@ -93,7 +92,6 @@ let totalRows = 0;
 let visibleRows = [];
 let rowResultScope = 0;
 let schemaObjects = [];
-let activeSchemaView = 'graph';
 let databaseLoadQueue = Promise.resolve();
 let pinnedColumns = new Set();
 let columnWidths = {};
@@ -113,6 +111,7 @@ const schemaSelection = createSchemaSelection({
   getObjects: () => schemaObjects,
 });
 const elements = buildShell();
+const navigation = createEditorNavigation({ elements });
 const clipboard = createClipboardBridge({ vscode });
 const documentController = createDocumentController({
   getDatabase: () => db,
@@ -175,8 +174,8 @@ const databaseHealthWorkflow = createDatabaseHealthWorkflow({
   getDatabase: () => db,
   showReport: (text) => {
     elements.schema.textContent = text;
-    setActiveView('schema');
-    setActiveSchemaView('ddl');
+    navigation.setView('schema');
+    navigation.setSchemaView('ddl');
   },
   setStatus: (message) => { elements.status.textContent = message; },
 });
@@ -231,9 +230,9 @@ const schemaView = createSchemaView({
     activeTableName: schemaSelection.activeTableName,
     activeTable: schemaSelection.activeTable,
     objectFilter,
-    activeSchemaView,
+    activeSchemaView: navigation.activeSchemaView,
   }),
-  activateSchemaView: setActiveSchemaView,
+  activateSchemaView: navigation.setSchemaView,
 });
 const sqlWorkspace = createSqlWorkspace({
   elements,
@@ -461,7 +460,7 @@ async function handleInput(event) {
     }
     page = 1;
     scheduleRefreshRows();
-    focusColumnFilter(columnName);
+    gridView.preserveColumnFilterFocus(columnName);
     return;
   }
 
@@ -843,13 +842,6 @@ async function loadMoreRows() {
   }
 }
 
-function focusColumnFilter(columnName) {
-  const input = elements.grid.querySelector(`[data-column-filter="${CSS.escape(columnName)}"]`);
-  const valueLength = input?.value.length ?? 0;
-  input?.focus();
-  input?.setSelectionRange?.(valueLength, valueLength);
-}
-
 function getVisibleRowOffset() {
   return editorSettings.autoPagination ? 0 : (page - 1) * pageSize;
 }
@@ -971,7 +963,7 @@ async function handleClick(event) {
 
   const viewButton = event.target.closest('[data-view]');
   if (viewButton) {
-    setActiveView(viewButton.dataset.view);
+    navigation.setView(viewButton.dataset.view);
     return;
   }
 
@@ -1030,11 +1022,6 @@ function handleDoubleClick(event) {
     return;
   }
 
-  const cellButton = gridCell.querySelector('[data-cell-row]');
-  if (cellButton?.disabled) {
-    return;
-  }
-
   const rowIndex = Number(gridCell.dataset.gridCellRow);
   const columnName = gridCell.dataset.gridCellColumn;
   const table = schemaSelection.activeTable;
@@ -1072,8 +1059,8 @@ function selectSchemaObject(type, name) {
   if (!schemaSelection.selectObject(type, name)) {
     return;
   }
-  setActiveView('schema');
-  setActiveSchemaView('ddl');
+  navigation.setView('schema');
+  navigation.setSchemaView('ddl');
   schemaView.renderSidebar();
   schemaView.renderSchema();
 }
@@ -1128,10 +1115,10 @@ async function runAction(action, sourceElement = null) {
       documentController.requestSave();
       break;
     case 'schema-view-graph':
-      setActiveSchemaView('graph');
+      navigation.setSchemaView('graph');
       break;
     case 'schema-view-ddl':
-      setActiveSchemaView('ddl');
+      navigation.setSchemaView('ddl');
       break;
     case 'schema-graph-fit':
       schemaView.fitGraph();
@@ -1165,30 +1152,6 @@ async function runAction(action, sourceElement = null) {
       await schemaWorkflows.dropIndex(sourceElement);
       break;
   }
-}
-
-function setActiveView(view) {
-  activeView = view;
-  for (const tab of elements.tabs) {
-    tab.classList.toggle('active', tab.dataset.view === view);
-  }
-  elements.data.classList.toggle('hidden', view !== 'data');
-  elements.schemaPanel.classList.toggle('hidden', view !== 'schema');
-  elements.query.classList.toggle('hidden', view !== 'query');
-}
-
-function setActiveSchemaView(view) {
-  activeSchemaView = view === 'ddl' ? 'ddl' : 'graph';
-  const graphActive = activeSchemaView === 'graph';
-  elements.schemaGraph.classList.toggle('hidden', !graphActive);
-  elements.schema.classList.toggle('hidden', graphActive);
-  elements.schemaGraphButton.classList.toggle('active', graphActive);
-  elements.schemaDdlButton.classList.toggle('active', !graphActive);
-  elements.schemaGraphButton.setAttribute('aria-pressed', String(graphActive));
-  elements.schemaDdlButton.setAttribute('aria-pressed', String(!graphActive));
-  elements.schemaGraphFit.classList.toggle('hidden', !graphActive);
-  elements.schemaGraphLayout.classList.toggle('hidden', !graphActive);
-  elements.schemaGraphSummary.classList.toggle('hidden', !graphActive);
 }
 
 function renderWalWarning(message) {

@@ -21,6 +21,7 @@ import {
 export function createGridView({ elements, getState, updateSelectionUi }) {
   const blobUrls = new Map();
   let renderFrame = 0;
+  let pendingColumnFilterFocus = null;
 
   function render({ bodyOnly = false } = {}) {
     const state = getState();
@@ -59,6 +60,7 @@ export function createGridView({ elements, getState, updateSelectionUi }) {
     evictBlobUrls(retainedBlobKeys);
     syncSelectAll(selectAll, visibleRows.length);
     updateSelectionUi();
+    restoreColumnFilterFocus();
   }
 
   function schedule() {
@@ -90,7 +92,7 @@ export function createGridView({ elements, getState, updateSelectionUi }) {
       if (!handle || !columnName || !grid) return;
 
       const columnIndex = Array.from(grid.querySelectorAll('.column-heading-row th')).findIndex((heading) => (
-        heading.querySelector(`[data-resize-column="${columnName}"]`)
+        heading.querySelector(`[data-resize-column="${CSS.escape(columnName)}"]`)
       ));
       if (columnIndex === -1) return;
 
@@ -159,6 +161,33 @@ export function createGridView({ elements, getState, updateSelectionUi }) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     });
+
+    elements.grid.addEventListener('keydown', (event) => {
+      const handle = event.target.closest?.('[data-resize-column]');
+      if (!handle || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+      event.preventDefault();
+      const columnName = handle.dataset.resizeColumn;
+      const widths = getState().columnWidths;
+      const currentWidth = widths[columnName] || handle.closest('th')?.offsetWidth || (columnName === '__rowNumber' ? ROW_NUMBER_COLUMN_WIDTH : 120);
+      const step = event.shiftKey ? 50 : 10;
+      widths[columnName] = Math.max(60, currentWidth + (event.key === 'ArrowRight' ? step : -step));
+      render();
+      window.requestAnimationFrame(() => elements.grid.querySelector(`[data-resize-column="${CSS.escape(columnName)}"]`)?.focus());
+    });
+  }
+
+  function preserveColumnFilterFocus(columnName) {
+    pendingColumnFilterFocus = columnName;
+  }
+
+  function restoreColumnFilterFocus() {
+    if (!pendingColumnFilterFocus) return;
+    const input = elements.grid.querySelector(`[data-column-filter="${CSS.escape(pendingColumnFilterFocus)}"]`);
+    if (!input) return;
+    const caret = input.value.length;
+    input.focus();
+    input.setSelectionRange?.(caret, caret);
+    pendingColumnFilterFocus = null;
   }
 
   function clearResources() {
@@ -168,6 +197,7 @@ export function createGridView({ elements, getState, updateSelectionUi }) {
 
   function buildTableHeader(state, pinnedLayouts, rowNumberStyle, selectAll) {
     const tableElement = createElement('table', { className: 'data-grid' });
+    tableElement.append(createElement('caption', { className: 'visually-hidden', text: `${state.table.name} data` }));
     const head = createElement('thead');
     const headings = createElement('tr', { className: 'column-heading-row' });
     const filters = createElement('tr', { className: 'column-filter-row' });
@@ -179,7 +209,10 @@ export function createGridView({ elements, getState, updateSelectionUi }) {
         } }),
         createElement('span', { className: 'column-name row-number-heading-label', text: '#' }),
       ] }),
-      createElement('div', { className: 'col-resize-handle', attributes: { 'data-resize-column': '__rowNumber' } }),
+      createElement('div', { className: 'col-resize-handle', attributes: {
+        role: 'separator', tabindex: '0', 'aria-orientation': 'vertical', 'aria-label': 'Resize row number column',
+        'aria-valuenow': String(state.columnWidths.__rowNumber || ROW_NUMBER_COLUMN_WIDTH), 'data-resize-column': '__rowNumber',
+      } }),
     ] }));
     filters.append(createElement('th', { className: 'row-number-header', style: rowNumberStyle, text: '' }));
     for (const column of state.table.columns) appendColumnHeaders(headings, filters, state, column, pinnedLayouts);
@@ -205,11 +238,14 @@ export function createGridView({ elements, getState, updateSelectionUi }) {
           createElement('button', { className: `pin-button${pinned ? ' pinned' : ''}`, text: '📌', title: pinned ? 'Unpin column' : 'Pin column to left', attributes: { type: 'button', 'data-pin-column': column.name } }),
         ] }),
       ] }),
-      createElement('div', { className: 'col-resize-handle', attributes: { 'data-resize-column': column.name } }),
+      createElement('div', { className: 'col-resize-handle', attributes: {
+        role: 'separator', tabindex: '0', 'aria-orientation': 'vertical', 'aria-label': `Resize ${column.name} column`,
+        'aria-valuenow': String(width || 120), 'data-resize-column': column.name,
+      } }),
     ] }));
     const filterStyle = pinned ? getPinnedCellStyle({ columnLayout: pinnedLayouts[column.name], zIndex: 42 }) : getGridColumnStyle({ columnWidth: width });
     filters.append(createElement('th', { className: pinned ? 'pinned' : '', style: filterStyle, children: [
-      createElement('input', { className: 'column-filter-input', attributes: { type: 'search', placeholder: 'Filter', value: state.columnFilters[column.name] ?? '', 'data-column-filter': column.name } }),
+      createElement('input', { className: 'column-filter-input', attributes: { type: 'search', placeholder: 'Filter', 'aria-label': `Filter ${column.name} column`, value: state.columnFilters[column.name] ?? '', 'data-column-filter': column.name } }),
     ] }));
   }
 
@@ -302,7 +338,7 @@ export function createGridView({ elements, getState, updateSelectionUi }) {
     checkbox.title = state.checked ? 'Deselect visible rows' : 'Select visible rows';
   }
 
-  return { bindColumnResizing, clearResources, rememberWidths, render, schedule };
+  return { bindColumnResizing, clearResources, preserveColumnFilterFocus, rememberWidths, render, schedule };
 }
 
 function columnBadges(column) {

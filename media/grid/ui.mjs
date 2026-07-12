@@ -1,29 +1,29 @@
 export function getCellInteraction({ tableType, column, value }) {
   if (tableType === 'view') {
     return {
-      disabled: true,
-      title: 'Views are read-only',
+      disabled: false,
+      title: 'Click to select · view is read-only · Ctrl/Cmd+C to copy',
     };
   }
 
   if (column?.generated) {
     return {
-      disabled: true,
-      title: 'Generated columns are read-only',
+      disabled: false,
+      title: 'Click to select · generated column is read-only · Ctrl/Cmd+C to copy',
     };
   }
 
   if (column?.canUpdate === false || column?.readOnly) {
     return {
-      disabled: true,
-      title: 'This column is read-only',
+      disabled: false,
+      title: 'Click to select · column is read-only · Ctrl/Cmd+C to copy',
     };
   }
 
   if (value instanceof Uint8Array) {
     return {
-      disabled: true,
-      title: 'BLOB values cannot be edited inline',
+      disabled: false,
+      title: 'Click to select · double-click for details · Ctrl/Cmd+C to copy',
     };
   }
 
