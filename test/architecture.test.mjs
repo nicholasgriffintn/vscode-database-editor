@@ -29,14 +29,47 @@ test('SQL export orchestration uses shared SQL, cancellation, schema, sink, and 
 
 test('webview orchestration imports generic error and collection helpers', async () => {
   const source = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
+  const sqlWorkspace = await readFile(new URL('../media/sql/workspace.mjs', import.meta.url), 'utf8');
 
   assert.match(source, /from '\.\/utilities\/errors\.mjs'/);
-  assert.match(source, /from '\.\/utilities\/array\.mjs'/);
+  assert.match(sqlWorkspace, /from '\.\.\/utilities\/array\.mjs'/);
   assert.match(source, /from '\.\/utilities\/text-control\.mjs'/);
   assert.doesNotMatch(source, /function (?:getErrorMessage|arraysEqual|isTextControl|replaceTextControlSelection|deleteTextControlSelection|getSelectedTextInControl|createSvgElement)\(/);
 });
 
 test('media shared helpers use the utilities directory instead of utils suffixes', async () => {
-  const mediaFiles = await readdir(new URL('../media/', import.meta.url));
+  const mediaFiles = await readdir(new URL('../media/', import.meta.url), { recursive: true });
   assert.deepEqual(mediaFiles.filter((name) => /-utils\.mjs$/.test(name)), []);
+});
+
+test('media root stays an entrypoint instead of becoming a flat feature namespace', async () => {
+  const entries = await readdir(new URL('../media/', import.meta.url), { withFileTypes: true });
+  assert.deepEqual(entries.filter((entry) => entry.isFile() && entry.name.endsWith('.mjs')).map((entry) => entry.name), ['webview.mjs']);
+  for (const directory of ['csv', 'data', 'database', 'dialogs', 'editor', 'grid', 'schema', 'sql', 'utilities']) {
+    assert.equal(entries.some((entry) => entry.isDirectory() && entry.name === directory), true, `missing media/${directory}/`);
+  }
+});
+
+test('webview entrypoint remains orchestration-only', async () => {
+  const source = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
+  assert.ok(source.split('\n').length <= 1800, 'webview.mjs must stay below 1,800 lines');
+  assert.doesNotMatch(source, /function (?:showRowDetails|showInsertDialog|showCreateIndexDialog|renderSchemaGraph|renderGrid|runSqlWorkspace|createSchemaField|parseCsv)\(/);
+  assert.match(source, /createGridView/);
+  assert.match(source, /createRowWorkflows/);
+  assert.match(source, /createSchemaView/);
+  assert.match(source, /createSqlWorkspace/);
+});
+
+test('exported media functions have a single owning module', async () => {
+  const mediaRoot = new URL('../media/', import.meta.url);
+  const paths = (await readdir(mediaRoot, { recursive: true })).filter((name) => name.endsWith('.mjs') && !name.startsWith('vendor/'));
+  const owners = new Map();
+  for (const path of paths) {
+    const source = await readFile(new URL(path, mediaRoot), 'utf8');
+    for (const match of source.matchAll(/export (?:async )?function ([A-Za-z0-9_]+)/g)) {
+      const existing = owners.get(match[1]);
+      assert.equal(existing, undefined, `${match[1]} is exported by both ${existing} and ${path}`);
+      owners.set(match[1], path);
+    }
+  }
 });

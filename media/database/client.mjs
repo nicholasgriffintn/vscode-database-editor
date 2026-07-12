@@ -3,8 +3,8 @@ import {
   assertSqlScriptCanExport,
   buildTableCount,
   quoteIdentifier,
-} from './sql.mjs';
-import { executeSqlScript } from './sql-workspace.mjs';
+} from '../sql/statements.mjs';
+import { executeSqlScript } from '../sql/workspace.mjs';
 
 export function configureDatabase(db) {
   db.run('PRAGMA foreign_keys = ON');

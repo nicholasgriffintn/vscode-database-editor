@@ -6,7 +6,7 @@ import {
   getRowValidationErrors,
   normalizeRowFieldValue,
   rowValuesEqual,
-} from '../media/row-detail-ui.mjs';
+} from '../media/grid/row-detail.mjs';
 
 const textColumn = { name: 'name', type: 'TEXT', nullable: false };
 const nullableColumn = { name: 'notes', type: 'TEXT', nullable: true };

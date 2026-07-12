@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getGridColumnCount, getGridEmptyStateKind } from '../media/grid-empty-state.mjs';
+import { getGridColumnCount, getGridEmptyStateKind } from '../media/grid/empty-state.mjs';
 
 test('grid empty state is none when rows are present', () => {
   assert.equal(getGridEmptyStateKind({ tableType: 'table', columnCount: 5, rowCount: 3 }), 'none');

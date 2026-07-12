@@ -21,8 +21,10 @@ export async function run() {
 
   try {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    const initialWebviewLoad = waitForMessage(api, (message) => message.type === 'loadDatabase');
     await vscode.commands.executeCommand('vscode.openWith', documentUri, viewType);
     await api.waitForDocument(documentUri.toString());
+    await initialWebviewLoad;
 
     await testSaveWithInterveningEdit(api, fileSystem, documentUri, fixtureBytes);
     await testUndoRedoAndRevert(api, documentUri, fixtureBytes);

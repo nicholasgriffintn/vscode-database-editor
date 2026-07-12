@@ -5,7 +5,7 @@ import {
   createSqlExportState,
   getSqlExportUiState,
   transitionSqlExport,
-} from '../media/export-workflows.mjs';
+} from '../media/dialogs/export-workflow.mjs';
 
 test('SQL export requests are revision-bound and filesystem-safe', () => {
   const started = transitionSqlExport(createSqlExportState(), {

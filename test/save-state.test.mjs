@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getDirtyStatusText, getSaveButtonState } from '../media/save-state.mjs';
+import { getDirtyStatusText, getSaveButtonState } from '../media/editor/save-state.mjs';
 
 test('save button is disabled until a database is open and dirty', () => {
   assert.deepEqual(getSaveButtonState({ hasDatabase: false, isDirty: false, isSaving: false }), {

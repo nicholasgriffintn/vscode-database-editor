@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { formatSchemaObjectDdl, resolveSchemaSelection } from '../media/schema-object-ui.mjs';
+import { formatSchemaObjectDdl, resolveSchemaSelection } from '../media/schema/object-ui.mjs';
 
 const objects = [
   { type: 'table', name: 'people', tableName: 'people', sql: 'CREATE TABLE people (id)' },

@@ -1,4 +1,4 @@
-import { quoteIdentifier } from './sql.mjs';
+import { quoteIdentifier } from '../sql/statements.mjs';
 
 const allowedTypes = new Set([
   'INTEGER',

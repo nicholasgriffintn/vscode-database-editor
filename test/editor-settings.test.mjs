@@ -9,7 +9,7 @@ import {
   getInstantCommitAction,
   normalizeEditorSettings,
   shouldRejectWasmFile,
-} from '../media/editor-settings.mjs';
+} from '../media/editor/settings.mjs';
 import hostSettingsModule from '../dist/editor-settings.js';
 
 const { readEditorSettings } = hostSettingsModule;

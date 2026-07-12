@@ -8,7 +8,7 @@ import {
   requiresDestructiveSqlConfirmation,
   runDialogMutation,
   showConfirmation,
-} from '../media/dialog-workflows.mjs';
+} from '../media/dialogs/workflows.mjs';
 
 test('destructive confirmation models name the exact row, table, column, and count', () => {
   assert.deepEqual(createConfirmationModel({

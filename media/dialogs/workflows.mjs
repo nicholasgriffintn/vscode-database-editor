@@ -1,4 +1,4 @@
-import { getErrorMessage } from './utilities/errors.mjs';
+import { getErrorMessage } from '../utilities/errors.mjs';
 
 export function createConfirmationModel({
   kind,

@@ -17,3 +17,14 @@ export function formatSchemaObjectDdl(object) {
     `- ${object.tableName}`,
   ].join('\n');
 }
+
+export function getObjectItemInteraction({ objectType, objectName, tableName }) {
+  const browsable = objectType === 'table' || objectType === 'view';
+  return browsable
+    ? { browsable: true, selectable: true, title: undefined }
+    : {
+      browsable: false,
+      selectable: objectType === 'index' || objectType === 'trigger',
+      title: `Inspect ${objectName} DDL · defined on ${tableName}`,
+    };
+}

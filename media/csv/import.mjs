@@ -1,4 +1,4 @@
-import { quoteIdentifier } from './sql.mjs';
+import { quoteIdentifier } from '../sql/statements.mjs';
 
 export function parseCsv(source) {
   const text = String(source ?? '').replace(/^\uFEFF/, '');

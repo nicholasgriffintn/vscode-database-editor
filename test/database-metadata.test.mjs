@@ -8,7 +8,7 @@ import {
   getUnknownCountRowWindow,
   loadTableCountsInBackground,
   resolveUnknownCountRows,
-} from '../media/database-metadata.mjs';
+} from '../media/database/metadata.mjs';
 
 test('row counts are cached by database revision, object, and filter', () => {
   const cache = createRowCountCache();

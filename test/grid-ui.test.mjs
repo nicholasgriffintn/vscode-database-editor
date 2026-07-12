@@ -8,7 +8,6 @@ import {
   getCopilotSelectionContext,
   getDeleteRowsConfirmationMessage,
   getGridColumnStyle,
-  getObjectItemInteraction,
   getInfiniteRowWindow,
   getInfiniteScrollState,
   getPagerState,
@@ -24,7 +23,8 @@ import {
   getSelectAllRowsState,
   getTextEditingShortcutAction,
   shouldKeepKeyboardShortcutInField,
-} from '../media/grid-ui.mjs';
+} from '../media/grid/ui.mjs';
+import { getObjectItemInteraction } from '../media/schema/object-ui.mjs';
 
 test('Copilot selection context includes grid state without row or filter values', () => {
   assert.deepEqual(getCopilotSelectionContext({
@@ -210,15 +210,11 @@ test('row actions are per-row and table-only', () => {
 
 test('failed insert and schema submissions retain dialog input and active-table state', async () => {
   const source = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
+  const rowSource = await readFile(new URL('../media/grid/row-workflows.mjs', import.meta.url), 'utf8');
+  const formSource = await readFile(new URL('../media/dialogs/form.mjs', import.meta.url), 'utf8');
 
-  assert.doesNotMatch(
-    source,
-    /await insertRow\(table, form\);\s*dialog\.close\(\);/,
-  );
-  assert.doesNotMatch(
-    source,
-    /await onSubmit\(readSchemaForm\(form, fields\)\);\s*dialog\.close\(\);/,
-  );
+  assert.match(rowSource, /runDialogMutation\([\s\S]{0,240}if \(result\.ok\) dialog\.close\(\)/);
+  assert.match(formSource, /runDialogMutation\([\s\S]{0,300}if \(result\.ok\) dialog\.close\(\)/);
   assert.doesNotMatch(
     source,
     /activeTableName = values\.(?:tableName|newName)\.trim\(\);\s*await applySchemaChange/,
@@ -227,15 +223,19 @@ test('failed insert and schema submissions retain dialog input and active-table 
 
 test('destructive webview actions use shared confirmations and dirty row dialogs guard dismissal', async () => {
   const source = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
+  const schemaSource = await readFile(new URL('../media/schema/workflows.mjs', import.meta.url), 'utf8');
+  const rowSource = await readFile(new URL('../media/grid/row-workflows.mjs', import.meta.url), 'utf8');
 
   assert.doesNotMatch(source, /window\.confirm\(/);
-  assert.match(source, /kind: 'row',[\s\S]{0,160}tableName: table\.name,[\s\S]{0,160}rowNumber:/);
-  assert.match(source, /kind: 'column',[\s\S]{0,160}columnName: values\.columnName/);
-  assert.match(source, /kind: 'table',[\s\S]{0,160}tableName: table\.name/);
-  assert.match(source, /kind: 'index',[\s\S]{0,160}target: index\.name/);
-  assert.match(source, /if \(hasDirtyDraft\)[\s\S]{0,240}createDiscardDraftModel/);
-  assert.match(source, /dialog\.addEventListener\('cancel',[\s\S]{0,240}event\.preventDefault\(\)/);
-  assert.match(source, /const result = await deleteRowAt\(rowIndex, remove\);\s*if \(result\.deleted\) \{\s*dialog\.close\(\)/);
+  assert.doesNotMatch(rowSource, /window\.confirm\(/);
+  assert.match(rowSource, /kind: 'row',[\s\S]{0,160}tableName: state\.editableTable\.name,[\s\S]{0,160}rowNumber:/);
+  assert.doesNotMatch(schemaSource, /window\.confirm\(/);
+  assert.match(schemaSource, /kind: 'column',[\s\S]{0,160}columnName: values\.columnName/);
+  assert.match(schemaSource, /kind: 'table',[\s\S]{0,160}tableName: table\.name/);
+  assert.match(schemaSource, /kind: 'index',[\s\S]{0,160}target: index\.name/);
+  assert.match(rowSource, /dirty && !await confirm\(createDiscardDraftModel/);
+  assert.match(rowSource, /dialog\.addEventListener\('cancel',[\s\S]{0,180}event\.preventDefault\(\)/);
+  assert.match(rowSource, /const result = await deleteAt\(rowIndex, remove\);[\s\S]{0,100}if \(result\.deleted\) dialog\.close\(\)/);
 });
 
 test('pager state belongs to the bottom-right grid footer', () => {

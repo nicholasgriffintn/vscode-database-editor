@@ -5,7 +5,7 @@ import {
   addQueryHistoryEntry,
   formatQueryHistoryLabel,
   normalizeQueryHistory,
-} from '../media/query-history.mjs';
+} from '../media/sql/query-history.mjs';
 
 test('query history stores trimmed newest-first entries and ignores blanks', () => {
   assert.deepEqual(addQueryHistoryEntry([], '  SELECT 1;  '), ['SELECT 1;']);

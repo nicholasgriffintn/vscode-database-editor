@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getInfiniteRowWindow, getInfiniteScrollState, getPagerState } from '../media/grid-ui.mjs';
-import { DEFAULT_GRID_ROW_HEIGHT, getGridWindow } from '../media/grid-window.mjs';
+import { getInfiniteRowWindow, getInfiniteScrollState, getPagerState } from '../media/grid/ui.mjs';
+import { DEFAULT_GRID_ROW_HEIGHT, getGridWindow } from '../media/grid/window.mjs';
 
 class FakeElement {
   constructor(tagName) {
@@ -29,7 +29,7 @@ globalThis.document = {
   createElement: (tagName) => new FakeElement(tagName),
 };
 
-const { createGridWindowSpacer } = await import('../media/grid-window-view.mjs');
+const { createGridWindowSpacer } = await import('../media/grid/window-view.mjs');
 
 test('virtual grid scroll loads one chunk at the bottom and reports retained rows', () => {
   const viewportHeight = 760;

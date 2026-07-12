@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import initSqlJs from 'sql.js';
 
-import { executeSqlScript, executeSqlStatements, prepareSqlWorkspaceResults } from '../media/sql-workspace.mjs';
+import { executeSqlScript, executeSqlStatements, prepareSqlWorkspaceResults } from '../media/sql/workspace.mjs';
 
 async function createDatabase() {
   const SQL = await initSqlJs({

@@ -3,8 +3,8 @@ import path from 'node:path';
 import test from 'node:test';
 import initSqlJs from 'sql.js';
 
-import { importCsvRows, parseCsv, convertCsvValue } from '../media/csv-import.mjs';
-import { queryAll } from '../media/sqlite-client.mjs';
+import { importCsvRows, parseCsv, convertCsvValue } from '../media/csv/import.mjs';
+import { queryAll } from '../media/database/client.mjs';
 
 test('parses BOM, CRLF, quoted commas, quotes, newlines, and empty fields', () => {
   assert.deepEqual(parseCsv('\uFEFFid,name,note,empty\r\n1,"Ada, A.","said ""hello""\nagain",\r\n').rows, [

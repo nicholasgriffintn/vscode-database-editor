@@ -5,7 +5,7 @@ import {
   buildSchemaGraphModel,
   getSchemaGraphEmptyState,
   layoutSchemaGraph,
-} from '../media/schema-graph.mjs';
+} from '../media/schema/graph.mjs';
 
 function table(name, options = {}) {
   return {

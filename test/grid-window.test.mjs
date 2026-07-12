@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getEvictedGridResources, getGridRenderPlan, getGridWindow } from '../media/grid-window.mjs';
+import { getEvictedGridResources, getGridRenderPlan, getGridWindow } from '../media/grid/window.mjs';
 
 test('50k logical rows retain a bounded bidirectional window with stable spacer geometry', () => {
   const middle = getGridWindow({

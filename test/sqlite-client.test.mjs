@@ -15,8 +15,8 @@ import {
   runSqlScript,
   runWrite,
   runWriteBatch,
-} from '../media/sqlite-client.mjs';
-import { analyzeSqlScript, buildDelete, buildInsert, buildTableSelect, buildUpdate } from '../media/sql.mjs';
+} from '../media/database/client.mjs';
+import { analyzeSqlScript, buildDelete, buildInsert, buildTableSelect, buildUpdate } from '../media/sql/statements.mjs';
 
 async function createDatabase() {
   const SQL = await initSqlJs({
@@ -97,7 +97,7 @@ test('structural metadata discovery does not count tables or views', async () =>
 
 test('configures every database connection with enforced foreign keys', async () => {
   const db = await createDatabase();
-  const { configureDatabase } = await import('../media/sqlite-client.mjs');
+  const { configureDatabase } = await import('../media/database/client.mjs');
 
   configureDatabase(db);
   db.run('CREATE TABLE parents (id INTEGER PRIMARY KEY)');
@@ -126,7 +126,7 @@ test('configures every database connection with enforced foreign keys', async ()
 });
 
 test('database configuration fails visibly when foreign keys remain disabled', async () => {
-  const { configureDatabase } = await import('../media/sqlite-client.mjs');
+  const { configureDatabase } = await import('../media/database/client.mjs');
   const db = {
     run() {},
     exec() {

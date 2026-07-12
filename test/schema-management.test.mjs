@@ -12,8 +12,8 @@ import {
   buildDropTable,
   buildRenameTable,
   parseIndexColumnNames,
-} from '../media/schema-management.mjs';
-import { queryAll } from '../media/sqlite-client.mjs';
+} from '../media/schema/management.mjs';
+import { queryAll } from '../media/database/client.mjs';
 
 test('builds schema management statements with quoted identifiers', () => {
   assert.equal(

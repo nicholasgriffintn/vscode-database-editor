@@ -354,16 +354,3 @@ export function getPinnedCellStyle({ columnLayout, rowOffset, zIndex }) {
   }
   return declarations.length > 0 ? declarations.join(';') : undefined;
 }
-
-export function getObjectItemInteraction({ objectType, objectName, tableName }) {
-  const isBrowsable = objectType === 'table' || objectType === 'view';
-  if (isBrowsable) {
-    return { browsable: true, selectable: true, title: undefined };
-  }
-
-  return {
-    browsable: false,
-    selectable: objectType === 'index' || objectType === 'trigger',
-    title: `Inspect ${objectName} DDL · defined on ${tableName}`,
-  };
-}
