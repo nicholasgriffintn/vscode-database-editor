@@ -3,6 +3,30 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
+const changelog = await readFile(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+const vscodeIgnore = await readFile(new URL('../.vscodeignore', import.meta.url), 'utf8');
+
+test('Marketplace metadata describes the v1 SQLite editor without changing the release version early', () => {
+  assert.equal(manifest.description, 'Browse, edit, query, import, and export SQLite databases directly in VS Code.');
+  assert.equal(manifest.version, '0.0.6');
+  assert.match(changelog, /^## 1\.0\.0$/m);
+  assert.match(changelog, /WAL sidecars/);
+});
+
+test('README documents every contributed command and setting', () => {
+  for (const command of manifest.contributes.commands) {
+    assert.match(readme, new RegExp(escapeRegex(command.title), 'i'), `${command.command} title`);
+  }
+  for (const setting of Object.keys(manifest.contributes.configuration.properties)) {
+    assert.ok(readme.includes(`\`${setting}\``), `${setting} documentation`);
+  }
+});
+
+test('VSIX ignore patterns contain no duplicates', () => {
+  const patterns = vscodeIgnore.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  assert.equal(new Set(patterns).size, patterns.length);
+});
 
 test('new database command is contributed and activates the extension', () => {
   const command = manifest.contributes.commands.find((candidate) => candidate.command === 'databaseEditor.newDatabase');
@@ -68,3 +92,7 @@ test('editor configuration exposes browsing, editing, persistence, and resource 
   assert.match(properties['databaseEditor.maxFileSizeMb'].markdownDescription, /WASM/i);
   assert.match(properties['databaseEditor.maxRows'].markdownDescription, /0 = unlimited/i);
 });
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

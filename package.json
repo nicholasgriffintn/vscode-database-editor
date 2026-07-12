@@ -1,6 +1,7 @@
 {
   "name": "vscode-database-editor",
   "displayName": "Database Editor",
+  "description": "Browse, edit, query, import, and export SQLite databases directly in VS Code.",
   "version": "0.0.6",
   "publisher": "NicholasGriffin",
   "license": "Apache-2.0",

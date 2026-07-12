@@ -18,4 +18,3 @@ pnpm-lock.yaml
 .vscode/**
 IDEA.md
 .wrangler/**
-website/**

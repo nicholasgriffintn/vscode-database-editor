@@ -18,6 +18,7 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 - **Pin rows & columns** — Pin important columns to the left and mark rows for easy reference
 - **VS Code save integration** — Edits are tracked and saved using the normal `Ctrl+S` / `Cmd+S` flow with undo/redo support
 - **Schema management** — Create, rename, and drop tables; add and remove columns
+- **Indexes and health checks** — Create and inspect indexes, inspect triggers, and run bounded integrity and foreign-key checks
 - **SQL workspace** — Run SELECTs, PRAGMAs, and multi-statement SQL scripts with result grids, query history, rollback-safe writes, and normal VS Code save tracking
 - **Export** — Export visible rows as CSV, or dump schema and table data as SQL
 - **Local SQLite runtime** — Powered by [`sql.js`](https://github.com/sql-js/sql.js) (SQLite compiled to WebAssembly) with no native SQLite installation or database server required
@@ -31,6 +32,8 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 5. Press `Ctrl+S` (`Cmd+S` on macOS) or click **Save** to persist changes unless `databaseEditor.instantCommit` is enabled.
 
 The new-database command uses VS Code's Save dialog, writes a valid empty SQLite file through the workspace filesystem, and opens it directly in the custom editor. This works for local files and writable virtual-workspace filesystem providers.
+
+Command Palette actions include **New SQLite Database**, **Open as SQLite Database**, **Save Database**, and—when Copilot integration is enabled—**Chat with SQLite Database**.
 
 ### How editing and saving work
 
@@ -127,6 +130,7 @@ Settings use the extension's actual `databaseEditor.*` namespace. They can be se
 | --- | ---: | --- |
 | `databaseEditor.maxFileSizeMb` | `200` | Maximum SQLite file size, in MB, loaded by the WebAssembly editor backend (`0` = unlimited). The current editor uses the WASM/sql.js backend. |
 | `databaseEditor.defaultPageSize` | `500` | Rows per page when a database opens. The pager also offers common sizes and includes custom defaults. |
+| `databaseEditor.autoPagination` | `true` | Load the next bounded row chunk in the background when you scroll near the bottom, while retaining previously loaded rows. |
 | `databaseEditor.maxRows` | `0` | Maximum browsable rows per table/view after filtering (`0` = unlimited). Paging still applies within the cap. |
 | `databaseEditor.instantCommit` | `never` | Auto-save strategy after grid, schema, or SQL writes: `always`, `never`, or `remote-only`. Manual Save remains available in every mode. |
 | `databaseEditor.doubleClickBehavior` | `inline` | Cell double-click action: `inline` for scalar grid editing, or `modal` for the row editor. |
