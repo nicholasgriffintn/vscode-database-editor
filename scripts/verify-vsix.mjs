@@ -20,11 +20,11 @@ export function validateVsixContents({ entries, manifest, expectedManifest, expe
   for (const required of [
     'package.json', 'readme.md', 'changelog.md', 'LICENSE.txt', expectedManifest.main.replace(/^\.\//, ''),
     'media/vendor/sqljs/sql-wasm.js', 'media/vendor/sqljs/sql-wasm.wasm', 'media/vendor/sqljs/LICENSE.sql.js',
-    'docs/demo.gif', 'docs/copilot-demo.gif', ...expectedMediaPaths,
+    ...expectedMediaPaths,
   ]) requireFile(required);
 
   for (const entry of entries) {
-    if (/^extension\/(?:src|test|scripts|\.changeset|\.hermes)\//.test(entry)) failures.push(`Development file packaged: ${entry}`);
+    if (/^extension\/(?:src|test|scripts|docs|\.changeset|\.hermes)\//.test(entry)) failures.push(`Development file packaged: ${entry}`);
   }
   return failures;
 }

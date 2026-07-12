@@ -6,7 +6,7 @@ import { validateVsixContents } from '../scripts/verify-vsix.mjs';
 const required = [
   'package.json', 'readme.md', 'changelog.md', 'LICENSE.txt', 'dist/extension.js',
   'media/vendor/sqljs/sql-wasm.js', 'media/vendor/sqljs/sql-wasm.wasm', 'media/vendor/sqljs/LICENSE.sql.js',
-  'docs/demo.gif', 'docs/copilot-demo.gif', 'media/webview.mjs', 'media/styles.css',
+  'media/webview.mjs', 'media/styles.css',
 ].map((file) => `extension/${file}`);
 
 test('VSIX validation accepts the exact release assets and metadata', () => {

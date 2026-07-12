@@ -1,5 +1,13 @@
 # vscode-database-editor
 
+## 0.1.1
+
+### Patch Changes
+
+- chore: move images to website url
+
+- [`5d5da7b`](https://github.com/nicholasgriffintn/vscode-database-editor/commit/5d5da7b6bd870290050e41fcb37dbeb7eb2a1b60) Thanks [@nicholasgriffintn](https://github.com/nicholasgriffintn)! - Fix a grid regression where switching from one deeply-scrolled table to another could render an empty grid due to stale scroll position being reused across table data loads.
+
 ## 0.1.0
 
 ### Minor Changes

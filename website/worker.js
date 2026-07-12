@@ -272,7 +272,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (url.pathname === "/demo.gif" || url.pathname === "/database-editor-icon.png") {
+    if (url.pathname === "/demo.gif" || url.pathname === "/copilot-demo.gif" || url.pathname === "/database-editor-icon.png") {
       return env.ASSETS.fetch(request);
     }
 

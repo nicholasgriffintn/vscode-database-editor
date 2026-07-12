@@ -4,7 +4,7 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 
 [![Visual Studio Marketplace](https://img.shields.io/badge/marketplace-NicholasGriffin.vscode--database--editor-blue)](https://marketplace.visualstudio.com/items?itemName=NicholasGriffin.vscode-database-editor)
 
-![SQLite Database Editor VS Code demo](docs/demo.gif)
+![SQLite Database Editor VS Code demo](https://dbviewer.app/demo.gif)
 
 ## Features
 
@@ -76,7 +76,7 @@ If a script with explicit transaction control commits a change before a later st
 
 When GitHub Copilot Chat is installed, use `@sqlite`, its `/schema`, `/query`, `/explain`, and `/profile` commands, or the “Chat with SQLite Database” editor action. The participant keeps recent conversation turns and receives privacy-safe editor context: the active database, selected table/view, sort state, selected column names, selected visible row numbers, and whether filters are active. Grid row values and raw filter text are never included in that automatic context.
 
-![GitHub Copilot Chat integration demo](docs/copilot-demo.gif)
+![GitHub Copilot Chat integration demo](https://dbviewer.app/copilot-demo.gif)
 
 Copilot tools can:
 
