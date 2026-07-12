@@ -1,8 +1,58 @@
 import { createElement } from '../utilities/dom.mjs';
+import { formatRowCount } from '../database/metadata.mjs';
+import { getPagerState } from '../grid/ui.mjs';
+
+export function createEditorControls({ elements, getState }) {
+  function render() {
+    const state = getState();
+    const { table } = state;
+    const pager = getPagerState({
+      page: state.page,
+      pageSize: state.pageSize,
+      filteredRows: state.totalRows,
+      totalRows: table?.rowCount ?? state.totalRows,
+      autoPagination: state.autoPagination,
+      loadedRows: state.loadedRows,
+    });
+    elements.pageLabel.textContent = pager.label;
+    elements.pageRowCount.textContent = table
+      ? table.rowCount === null
+        ? `${formatRowCount(null)} · ${state.loadedRows.toLocaleString()} loaded`
+        : state.maxRows > 0 && table.rowCount > state.totalRows
+          ? `${state.totalRows.toLocaleString()} of ${table.rowCount.toLocaleString()} rows shown`
+          : `${table.rowCount.toLocaleString()} row${table.rowCount !== 1 ? 's' : ''} total`
+      : '';
+    elements.previousPage.disabled = !pager.canGoPrevious;
+    elements.nextPage.disabled = !pager.canGoNext;
+    elements.previousPage.classList.toggle('hidden', state.autoPagination);
+    elements.nextPage.classList.toggle('hidden', state.autoPagination);
+
+    const editable = table?.type === 'table';
+    const schemaEditable = state.selectedSchemaObject?.type === 'table'
+      && state.selectedSchemaObject.name === table?.name
+      && editable;
+    elements.addRow.disabled = !editable;
+    elements.importCsv.disabled = !editable;
+    elements.deleteSelectedRows.disabled = !editable || state.selectedRowCount === 0;
+    elements.renameTable.disabled = !schemaEditable;
+    elements.addColumn.disabled = !schemaEditable;
+    elements.dropColumn.disabled = !schemaEditable || table.columns.length === 0;
+    elements.dropTable.disabled = !schemaEditable;
+    elements.exportCsv.disabled = !table;
+    elements.exportSql.disabled = state.sqlExportUi.disabled;
+    elements.exportSql.textContent = state.sqlExportUi.label;
+  }
+
+  return { render };
+}
 
 export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) {
   const title = createElement('div', { className: 'title', text: 'Loading SQLite database...' });
   const status = createElement('div', { className: 'status', text: 'Waiting for file' });
+  const databaseWarning = createElement('div', {
+    className: 'database-warning hidden',
+    attributes: { role: 'status' },
+  });
   const saveButton = actionButton('Save', 'save-database', { className: 'toolbar-button primary save-button', title: 'Save database (Ctrl+S / Cmd+S)', disabled: true });
   const dataTab = tab('Data', 'data', true);
   const schemaTab = tab('Schema', 'schema');
@@ -36,6 +86,7 @@ export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) 
   const dropTable = actionButton('Drop table', 'drop-table', { className: 'toolbar-button danger' });
   const createIndex = actionButton('Create index', 'create-index');
   const dropIndex = actionButton('Drop index', 'drop-index', { className: 'toolbar-button danger', disabled: true });
+  const checkHealth = actionButton('Check health', 'check-database-health', { title: 'Run bounded SQLite integrity and foreign-key checks' });
   const schema = createElement('pre', { className: 'schema-view hidden' });
   const schemaGraph = createElement('div', { className: 'schema-graph-wrap' });
   const schemaGraphButton = actionButton('Graph', 'schema-view-graph', { className: 'segmented-button active' });
@@ -46,7 +97,7 @@ export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) 
   const schemaPanel = createElement('section', { className: 'schema-panel hidden', children: [
     createElement('div', { className: 'schema-header', children: [
       heading('Schema tools', 'Visualize table relationships, manage the selected table, or inspect generated SQLite definitions.'),
-      createElement('div', { className: 'schema-toolbar', children: [newTable, renameTable, addColumn, dropColumn, dropTable, createIndex, dropIndex] }),
+      createElement('div', { className: 'schema-toolbar', children: [newTable, renameTable, addColumn, dropColumn, dropTable, createIndex, dropIndex, checkHealth] }),
     ] }),
     createElement('div', { className: 'schema-subtoolbar', children: [
       createElement('div', { className: 'schema-view-switch', children: [schemaGraphButton, schemaDdlButton] }),
@@ -69,12 +120,13 @@ export function createEditorShell({ app, pageSizes, pageSize, rowCopyFormats }) 
   ] });
   app.replaceChildren(
     createElement('header', { className: 'topbar', children: [createElement('div', { className: 'title-block', children: [title, status] }), createElement('nav', { className: 'tabs', children: [dataTab, schemaTab, queryTab] }), saveButton] }),
+    databaseWarning,
     createElement('main', { className: 'workspace', children: [sidebar, createElement('div', { className: 'content', children: [data, schemaPanel, query] })] }),
   );
   return {
-    title, status, saveButton, tabs: [dataTab, schemaTab, queryTab], sidebar, objectRefresh, filterInput, dataRefresh,
+    title, status, databaseWarning, saveButton, tabs: [dataTab, schemaTab, queryTab], sidebar, objectRefresh, filterInput, dataRefresh,
     previousPage, nextPage, pageLabel, pageRowCount, pageSizeSelect, addRow, exportCsv, importCsv, exportSql,
-    copyRowsFormat, deleteSelectedRows, newTable, renameTable, addColumn, dropColumn, dropTable, createIndex, dropIndex,
+    copyRowsFormat, deleteSelectedRows, newTable, renameTable, addColumn, dropColumn, dropTable, createIndex, dropIndex, checkHealth,
     grid, pager, schema, schemaGraph, schemaGraphButton, schemaDdlButton, schemaGraphFit, schemaGraphLayout,
     schemaGraphSummary, schemaPanel, data, query, queryInput, queryHistorySelect, queryMessage, queryOutput,
   };

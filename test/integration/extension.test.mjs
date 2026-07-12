@@ -21,6 +21,7 @@ export async function run() {
 
   try {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await testFileWalWarning(api, extension.extensionUri);
     const initialWebviewLoad = waitForMessage(api, (message) => message.type === 'loadDatabase');
     await vscode.commands.executeCommand('vscode.openWith', documentUri, viewType);
     await api.waitForDocument(documentUri.toString());
@@ -35,6 +36,16 @@ export async function run() {
   } finally {
     fileSystemRegistration.dispose();
   }
+}
+
+async function testFileWalWarning(api, extensionUri) {
+  const databaseUri = vscode.Uri.joinPath(extensionUri, '.tmp', 'sample.sqlite');
+  const warningLoad = waitForMessage(api, (message) => message.type === 'loadDatabase' && message.walWarning);
+  await vscode.commands.executeCommand('vscode.openWith', databaseUri, viewType);
+  const message = await warningLoad;
+  assert.match(message.walWarning, /non-empty SQLite WAL sidecar \(8 KB\)/);
+  assert.match(message.walWarning, /may not include uncheckpointed changes/);
+  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
 }
 
 async function testCsvImportIsOneUndoStep(api, documentUri, fixtures) {

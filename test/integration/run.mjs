@@ -29,6 +29,7 @@ async function prepareIntegrationFixtures() {
   const wasmPath = require.resolve('sql.js/dist/sql-wasm.wasm');
   const SQL = await initSqlJs({ locateFile: () => wasmPath });
   const source = await readFile(fixturePath);
+  await writeFile(`${fixturePath}-wal`, new Uint8Array(8192));
   const database = new SQL.Database(source);
 
   for (let revision = 1; revision <= 4; revision += 1) {

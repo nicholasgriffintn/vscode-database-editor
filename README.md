@@ -50,6 +50,7 @@ The schema tools support:
 - Clicking a graph card to select that table/view and sync the sidebar, DDL, and data grid.
 - Table management actions for creating, renaming, and dropping tables, plus adding or removing columns.
 - Automatic refresh after schema changes so the graph, sidebar, DDL, and grid stay in sync.
+- A bounded **Check health** action that runs SQLite `quick_check` and `foreign_key_check` without changing the database.
 
 Schema changes run against the editor's in-memory database copy first. Save with the normal VS Code `Ctrl+S` / `Cmd+S` flow when you're ready to persist them.
 
@@ -148,6 +149,10 @@ Settings use the extension's actual `databaseEditor.*` namespace. They can be se
 - Only SQLite databases are supported.
 - The full database is loaded into memory. `databaseEditor.maxFileSizeMb` protects the editor from unexpectedly large files, but practical limits still depend on available memory.
 - SQL workspace changes run against the editor's in-memory copy until you save the custom editor.
+- Do not edit the same database concurrently from another application. The editor does not live-merge external changes, and saving an older in-memory snapshot can replace newer changes in the main database file.
+- For local file URIs, the editor warns when it can detect a non-empty adjacent `-wal` file. It does not replay, merge, checkpoint, truncate, or delete WAL/SHM sidecars; close or checkpoint the owning SQLite connection, then reopen the database before editing.
+- WAL detection is best-effort and unavailable for virtual or remote filesystem providers where adjacent-file probing is unsupported.
+- Locked files and files changed by external writers may fail to open or save. Resolve the lock/external writer and reopen the database rather than assuming the in-memory snapshot is current.
 - Query timeouts are cooperative checks between SQLite result steps; a single expensive SQLite/WASM step cannot be interrupted mid-step.
 - Views and tables without a usable primary key or `rowid` are browse-only in the data grid. They can still be queried from the SQL workspace.
 - Automatic Copilot redaction is based on output and referenced column names. Review sensitive databases before allowing query results to be sent to a language model.

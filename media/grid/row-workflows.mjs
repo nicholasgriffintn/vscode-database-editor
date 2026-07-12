@@ -194,7 +194,28 @@ export function createRowWorkflows({
       const update = buildUpdate({ tableName: table.name, columnName: column.name, column, identity: row.identity, primaryKeyColumns: table.primaryKeyColumns, rowidAlias: table.rowidAlias });
       runWrite(getState().database, update.sql, [parseCellInput(input, column, previousValue), ...update.identityParams], { expectedRowsModified: 1 });
       markChanged(); await refreshRows();
-    } catch (error) { reportError(error); renderGrid(); }
+      return true;
+    } catch (error) { reportError(error); renderGrid(); return false; }
+  }
+
+  async function clearCell(rowIndex, columnName, invoker = null) {
+    const state = getState();
+    const table = state.editableTable;
+    const row = state.visibleRows[rowIndex];
+    const column = table?.columns.find((candidate) => candidate.name === columnName);
+    if (!table || !row || !column || column.canUpdate === false || column.readOnly || row.values[column.name] instanceof Uint8Array) {
+      return false;
+    }
+    const confirmed = await confirm(createConfirmationModel({
+      kind: 'cell',
+      tableName: table.name,
+      columnName: column.name,
+      rowNumber: state.visibleRowOffset + rowIndex + 1,
+    }), invoker);
+    if (!confirmed) return false;
+    const updated = await updateCell(table, row, column, null, row.values[column.name]);
+    if (updated) setStatus(`Cleared ${column.name}`);
+    return updated;
   }
 
   async function deleteAt(rowIndex, invoker = null) {
@@ -267,7 +288,7 @@ export function createRowWorkflows({
     } catch (error) { const message = getErrorMessage(error); setStatus(message); return { ok: false, error: message }; }
   }
 
-  return { deleteAt, deleteSelected, showDetails, showInlineEditor, showInsert };
+  return { clearCell, deleteAt, deleteSelected, showDetails, showInlineEditor, showInsert };
 }
 
 function insertableColumns(table) { return table.columns.filter((column) => column.canInsert !== false && !column.generated && !column.hidden); }

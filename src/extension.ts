@@ -27,6 +27,7 @@ import { createSqliteChatParticipant, createSqliteFollowupProvider } from './sql
 import { SqliteDocumentRegistry } from './sqlite-document-registry';
 import type { SqliteSelectionContext, SqliteSelectionUpdate } from './sqlite-document-registry';
 import { loadSqlJs } from './sqljs-host';
+import { detectWalSidecar } from './sqlite-wal';
 import { createSqliteTools } from './sqlite-ai/tools';
 import { toArrayBuffer } from './utilities/binary';
 import { createCopilotConfigurationReaders } from './utilities/copilot-configuration';
@@ -433,15 +434,7 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       return;
     }
 
-    await this.postWebviewMessage(document, panel, {
-      type: 'loadDatabase',
-      name: vscode.workspace.asRelativePath(document.uri),
-      data: toArrayBuffer(data),
-      settings,
-      dirty: document.isDirty(),
-      revision: document.getRevision(),
-      resetViewState,
-    });
+    await this.postWebviewMessage(document, panel, await this.createLoadDatabaseMessage(document, data, resetViewState));
   }
 
   private async applyDatabaseChange(
@@ -453,15 +446,9 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
   ): Promise<SnapshotApplyResult> {
     let isRegisteringNewEdit = refreshPanels;
     const postSnapshot = async (snapshot: Uint8Array): Promise<void> => {
-      await this.postToDocumentPanels(document, {
-        type: 'loadDatabase',
-        name: vscode.workspace.asRelativePath(document.uri),
-        data: toArrayBuffer(snapshot),
-        settings: this.getEditorSettings(document.uri),
+      await this.postToDocumentPanels(document, await this.createLoadDatabaseMessage(document, snapshot, false, {
         dirty: document.isDirty(snapshot, { isNewEdit: isRegisteringNewEdit }),
-        revision: document.getRevision(),
-        resetViewState: false,
-      });
+      }));
     };
     const result = await applySnapshotDocumentChange({
       document,
@@ -483,6 +470,28 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
       revision: result.revision,
     });
     return result;
+  }
+
+  private async createLoadDatabaseMessage(
+    document: SqliteDocument,
+    data: Uint8Array,
+    resetViewState: boolean,
+    overrides: { dirty?: boolean } = {},
+  ): Promise<Extract<ExtensionMessage, { type: 'loadDatabase' }>> {
+    const wal = await detectWalSidecar({
+      databaseUri: document.uri,
+      stat: vscode.workspace.fs.stat,
+    });
+    return {
+      type: 'loadDatabase',
+      name: vscode.workspace.asRelativePath(document.uri),
+      data: toArrayBuffer(data),
+      settings: this.getEditorSettings(document.uri),
+      dirty: overrides.dirty ?? document.isDirty(),
+      revision: document.getRevision(),
+      resetViewState,
+      walWarning: wal.detected ? wal.warning : undefined,
+    };
   }
 
   private getEditorSettings(uri: vscode.Uri): EditorSettings {

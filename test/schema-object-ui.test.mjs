@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { formatSchemaObjectDdl, resolveSchemaSelection } from '../media/schema/object-ui.mjs';
+import {
+  createSchemaSelection,
+  formatSchemaObjectDdl,
+  resolveSchemaSelection,
+} from '../media/schema/object-ui.mjs';
 
 const objects = [
   { type: 'table', name: 'people', tableName: 'people', sql: 'CREATE TABLE people (id)' },
@@ -13,6 +17,34 @@ test('schema selection preserves an existing object and falls back to the active
   assert.equal(resolveSchemaSelection(objects, { type: 'index', name: 'people_name' }, 'people'), objects[1]);
   assert.equal(resolveSchemaSelection(objects, { type: 'index', name: 'missing' }, 'people'), objects[0]);
   assert.equal(resolveSchemaSelection([], { type: 'index', name: 'missing' }, 'people'), null);
+});
+
+test('schema selection owns active, editable, and inspected object state', () => {
+  const tables = [
+    { type: 'table', name: 'people' },
+    { type: 'view', name: 'people_summary' },
+  ];
+  const availableObjects = [
+    ...tables,
+    { type: 'index', name: 'people_name', tableName: 'people' },
+  ];
+  const selection = createSchemaSelection({
+    getTables: () => tables,
+    getObjects: () => availableObjects,
+  });
+
+  selection.reconcile();
+  assert.equal(selection.activeTable, tables[0]);
+  assert.equal(selection.editableTable, tables[0]);
+  assert.equal(selection.selectedObject, availableObjects[0]);
+
+  assert.equal(selection.selectTable('people_summary'), true);
+  assert.equal(selection.activeTable, tables[1]);
+  assert.equal(selection.editableTable, null);
+
+  assert.equal(selection.selectObject('index', 'people_name'), true);
+  assert.equal(selection.selectedObject, availableObjects[2]);
+  assert.equal(selection.selectTable('missing'), false);
 });
 
 test('index and trigger DDL inspection names the owning table', () => {

@@ -8,43 +8,35 @@ import {
 import { createElement, clear } from './utilities/dom.mjs';
 import { getErrorMessage } from './utilities/errors.mjs';
 import { applyTextEditingShortcut } from './utilities/text-control.mjs';
-import {
-  createSqlExportState,
-  getSqlExportUiState,
-  transitionSqlExport,
-} from './dialogs/export-workflow.mjs';
+import { createExportWorkflow } from './dialogs/export-workflow.mjs';
 import {
   createRowCountCache,
   createRowCountFilterKey,
-  formatRowCount,
   getUnknownCountRowWindow,
   loadTableCountsInBackground,
   resolveUnknownCountRows,
 } from './database/metadata.mjs';
-import {
-  createConfirmationModel,
-  showConfirmation,
-} from './dialogs/workflows.mjs';
-import { safeFileName } from './utilities/file.mjs';
+import { createDatabaseHealthWorkflow } from './database/health.mjs';
+import { showConfirmation } from './dialogs/workflows.mjs';
 import { showFormDialog } from './dialogs/form.mjs';
 import {
   getCellClipboardText,
-  getCopilotSelectionContext,
   getInfiniteRowWindow,
   getInfiniteScrollState,
-  getPagerState,
   getRefreshButtonState,
-  getRowSelectionKey,
-  getShiftedPinnedColumnLeft,
-  getSelectedVisibleRows,
-  getSelectAllRowsState,
   getTextEditingShortcutAction,
 } from './grid/ui.mjs';
-import { getDirtyStatusText, getSaveButtonState } from './editor/save-state.mjs';
-import { createEditorShell } from './editor/shell.mjs';
+import {
+  createDocumentController,
+  getDirtyStatusText,
+  getSaveButtonState,
+} from './editor/save-state.mjs';
+import { createEditorControls, createEditorShell } from './editor/shell.mjs';
+import { createClipboardBridge } from './editor/clipboard.mjs';
 import { createGridView } from './grid/view.mjs';
+import { createGridSelection } from './grid/selection.mjs';
 import { createRowWorkflows } from './grid/row-workflows.mjs';
-import { resolveSchemaSelection } from './schema/object-ui.mjs';
+import { createSchemaSelection } from './schema/object-ui.mjs';
 import { createSchemaView } from './schema/view.mjs';
 import { createSchemaWorkflows } from './schema/workflows.mjs';
 import { createCsvImportWorkflow } from './csv/workflow.mjs';
@@ -60,7 +52,6 @@ import {
 import {
   buildRowCopyContent,
   buildTableSelect,
-  toCsv,
 } from './sql/statements.mjs';
 import { createSqlWorkspace } from './sql/workspace.mjs';
 
@@ -89,8 +80,6 @@ let databaseName = 'SQLite database';
 let tables = [];
 const rowCountCache = createRowCountCache();
 let metadataLoadGeneration = 0;
-let activeTableName = null;
-let selectedSchemaObject = null;
 let activeView = 'data';
 let filter = '';
 let columnFilters = {};
@@ -103,26 +92,13 @@ let pageSize = editorSettings.defaultPageSize;
 let totalRows = 0;
 let visibleRows = [];
 let rowResultScope = 0;
-let selectedRow = null;
-let selectedCell = null;
-let lastSelectedRowIndex = null;
-let selectedRowKeys = new Set();
 let schemaObjects = [];
 let activeSchemaView = 'graph';
-let isDirty = false;
-let isSaving = false;
-let currentRevision = 0;
 let databaseLoadQueue = Promise.resolve();
-let saveRequestCounter = 0;
-let pendingSaveRequestIds = new Set();
-let shouldSaveAfterCompletion = false;
-let sqlExportState = createSqlExportState();
 let pinnedColumns = new Set();
 let columnWidths = {};
 
 let pinnedRows = new Set();
-let clipboardRequestId = 0;
-const pendingClipboardReads = new Map();
 let isRefreshingRows = false;
 let isLoadingMoreRows = false;
 let infiniteScrollCheckFrame = 0;
@@ -132,11 +108,82 @@ let isScrollingTowardBottom = true;
 
 let refreshRowsDebounceTimer = null;
 
+const schemaSelection = createSchemaSelection({
+  getTables: () => tables,
+  getObjects: () => schemaObjects,
+});
 const elements = buildShell();
+const clipboard = createClipboardBridge({ vscode });
+const documentController = createDocumentController({
+  getDatabase: () => db,
+  shouldAutoSave: () => getInstantCommitAction({
+    strategy: editorSettings.instantCommit,
+    isRemote: editorSettings.isRemote,
+  }) === 'save',
+  postMessage: (message) => vscode.postMessage(message),
+  render: ({ hasDatabase, isDirty, isSaving }) => {
+    const saveState = getSaveButtonState({ hasDatabase, isDirty, isSaving });
+    elements.saveButton.disabled = saveState.disabled;
+    elements.saveButton.textContent = saveState.label;
+    elements.status.textContent = getDirtyStatusText({ hasDatabase, isDirty, isSaving });
+  },
+  setStatus: (message) => { elements.status.textContent = message; },
+  defer: (callback) => window.setTimeout(callback, 0),
+});
+const gridSelection = createGridSelection({
+  elements,
+  vscode,
+  getState: () => ({
+    table: schemaSelection.activeTable,
+    visibleRows,
+    visibleRowOffset: getVisibleRowOffset(),
+    filter,
+    columnFilters,
+    sortColumn,
+    sortDirection,
+  }),
+});
+const editorControls = createEditorControls({
+  elements,
+  getState: () => ({
+    table: schemaSelection.activeTable,
+    selectedSchemaObject: schemaSelection.selectedObject,
+    page,
+    pageSize,
+    totalRows,
+    loadedRows: visibleRows.length,
+    autoPagination: editorSettings.autoPagination,
+    maxRows: editorSettings.maxRows,
+    selectedRowCount: gridSelection.selectedRows.length,
+    sqlExportUi: exportWorkflow.getUiState(),
+  }),
+});
+const exportWorkflow = createExportWorkflow({
+  vscode,
+  getState: () => ({
+    hasDatabase: Boolean(db),
+    databaseName,
+    table: schemaSelection.activeTable,
+    visibleRows,
+    revision: documentController.revision,
+    hasTables: tables.length > 0,
+  }),
+  setStatus: (message) => { elements.status.textContent = message; },
+  onStateChanged: () => editorControls.render(),
+});
+const databaseHealthWorkflow = createDatabaseHealthWorkflow({
+  getDatabase: () => db,
+  showReport: (text) => {
+    elements.schema.textContent = text;
+    setActiveView('schema');
+    setActiveSchemaView('ddl');
+  },
+  setStatus: (message) => { elements.status.textContent = message; },
+});
 const gridView = createGridView({
   elements,
   getState: () => ({
-    table: getActiveTable(),
+    table: schemaSelection.activeTable,
     visibleRows,
     visibleRowOffset: getVisibleRowOffset(),
     pinnedColumns,
@@ -145,12 +192,13 @@ const gridView = createGridView({
     columnFilters,
     sortColumn,
     sortDirection,
-    selectedRowKeys,
-    selectedRow,
-    selectedCell,
+    selectedRowKeys: gridSelection.selectedRowKeys,
+    selectedRow: gridSelection.selectedRow,
+    selectedCell: gridSelection.selectedCell,
   }),
-  updateSelectionUi,
+  updateSelectionUi: gridSelection.updateUi,
 });
+gridView.bindColumnResizing();
 const rowWorkflows = createRowWorkflows({
   elements,
   vscode,
@@ -158,20 +206,20 @@ const rowWorkflows = createRowWorkflows({
     database: db,
     databaseName,
     settings: editorSettings,
-    table: getActiveTable(),
-    editableTable: getEditableTable(),
+    table: schemaSelection.activeTable,
+    editableTable: schemaSelection.editableTable,
     visibleRows,
     visibleRowOffset: getVisibleRowOffset(),
   }),
-  selectGridCell,
+  selectGridCell: gridSelection.selectCell,
   renderGrid: () => gridView.render(),
   refreshRows,
   refreshTables,
-  markChanged,
-  clearSelectedRows,
-  getSelectedRows: getVisibleSelectedRows,
+  markChanged: documentController.markChanged,
+  clearSelectedRows: gridSelection.clearSelectedRows,
+  getSelectedRows: () => gridSelection.selectedRows,
   confirm: confirmDestructiveAction,
-  reportError,
+  reportError: documentController.reportError,
   setStatus: (message) => { elements.status.textContent = message; },
 });
 const schemaView = createSchemaView({
@@ -179,9 +227,9 @@ const schemaView = createSchemaView({
   getState: () => ({
     tables,
     schemaObjects,
-    selectedSchemaObject: getSelectedSchemaObject(),
-    activeTableName,
-    activeTable: getActiveTable(),
+    selectedSchemaObject: schemaSelection.selectedObject,
+    activeTableName: schemaSelection.activeTableName,
+    activeTable: schemaSelection.activeTable,
     objectFilter,
     activeSchemaView,
   }),
@@ -195,13 +243,13 @@ const sqlWorkspace = createSqlWorkspace({
   getDatabase: () => db,
   getSettings: () => editorSettings,
   confirm: confirmDestructiveAction,
-  markChanged,
+  markChanged: documentController.markChanged,
   refreshTables,
 });
 const schemaWorkflows = createSchemaWorkflows({
   getTables: () => tables,
-  getEditableTable,
-  getSelectedSchemaObject,
+  getEditableTable: () => schemaSelection.editableTable,
+  getSelectedSchemaObject: () => schemaSelection.selectedObject,
   showDialog: showSchemaDialog,
   confirm: confirmDestructiveAction,
   applyChange: applySchemaChange,
@@ -209,10 +257,10 @@ const schemaWorkflows = createSchemaWorkflows({
 });
 const csvImportWorkflow = createCsvImportWorkflow({
   vscode,
-  getEditableTable,
+  getEditableTable: () => schemaSelection.editableTable,
   getDatabase: () => db,
   showDialog: showSchemaDialog,
-  markChanged,
+  markChanged: documentController.markChanged,
   refreshTables,
   setStatus: (message) => { elements.status.textContent = message; },
 });
@@ -226,6 +274,7 @@ window.addEventListener('message', async (event) => {
       dirty: message.dirty,
       revision: message.revision,
       resetViewState: message.resetViewState,
+      walWarning: message.walWarning,
     });
     databaseLoadQueue = databaseLoadQueue.then(load, load);
     await databaseLoadQueue;
@@ -240,21 +289,15 @@ window.addEventListener('message', async (event) => {
       await refreshRows();
     }
   } else if (message.type === 'databaseSaved') {
-    handleDatabaseSaved(message.dirty, message.revision, message.requestId);
+    documentController.handleSaved(message.dirty, message.revision, message.requestId);
   } else if (message.type === 'databaseSaveFailed') {
-    handleDatabaseSaveFailed(message.message, message.requestId);
+    documentController.handleSaveFailed(message.message, message.requestId);
   } else if (message.type === 'documentStateChanged') {
-    currentRevision = Math.max(currentRevision, Number(message.revision) || 0);
-    isDirty = Boolean(message.dirty);
-    updateSaveUi();
+    documentController.applyExternalState(message);
   } else if (message.type === 'clipboardText') {
-    const pending = pendingClipboardReads.get(message.requestId);
-    if (pending) {
-      pendingClipboardReads.delete(message.requestId);
-      pending.resolve(message.text ?? '');
-    }
+    clipboard.handleMessage(message);
   } else if (message.type === 'sqlExportFinished') {
-    handleSqlExportFinished(message);
+    exportWorkflow.handleFinished(message);
   } else if (message.type === 'csvFileRead') {
     csvImportWorkflow.handleFileRead(message);
   }
@@ -311,100 +354,6 @@ function buildShell() {
   });
   window.addEventListener('keydown', handleGlobalKeyDown, true);
 
-  let resizeData = null;
-  grid.addEventListener('mousedown', (event) => {
-    const handle = event.target.closest('.col-resize-handle');
-    if (!handle) return;
-    const columnName = handle.dataset.resizeColumn;
-    if (!columnName) return;
-    event.preventDefault();
-    const gridEl = grid.querySelector('.data-grid');
-    if (!gridEl) return;
-    const colIndex = Array.from(gridEl.querySelectorAll('.column-heading-row th')).findIndex((th) =>
-      th.querySelector(`[data-resize-column="${columnName}"]`)
-    );
-    if (colIndex === -1) return;
-    const startX = event.clientX;
-    const th = handle.closest('th');
-    const startWidth = th?.offsetWidth || 120;
-    const gridRows = Array.from(gridEl.querySelectorAll('tr'));
-    const pinnedColumnCells = columnName === '__rowNumber'
-      ? Array.from(gridEl.querySelectorAll('th.pinned, td.pinned')).map((cell) => ({
-          cell,
-          startLeft: Number.parseFloat(cell.style.left) || 0,
-        }))
-      : [];
-    let rafHandle = 0;
-
-    handle.classList.add('active');
-    resizeData = {
-      columnName,
-      startX,
-      startWidth,
-      newWidth: startWidth,
-      handle,
-      colIndex,
-      gridRows,
-      pinnedColumnCells,
-    };
-
-    function applyColumnWidth() {
-      const activeResize = resizeData;
-      if (!activeResize) {
-        return;
-      }
-      const width = activeResize.newWidth;
-      for (const row of activeResize.gridRows) {
-        const cell = row.children[activeResize.colIndex];
-        if (cell) {
-          cell.style.width = `${width}px`;
-          cell.style.minWidth = `${width}px`;
-          cell.style.maxWidth = `${width}px`;
-        }
-      }
-      for (const pinnedColumn of activeResize.pinnedColumnCells) {
-        pinnedColumn.cell.style.left = `${getShiftedPinnedColumnLeft({
-          startLeft: pinnedColumn.startLeft,
-          startWidth: activeResize.startWidth,
-          newWidth: width,
-        })}px`;
-      }
-      rafHandle = 0;
-    }
-
-    function onMouseMove(e) {
-      if (!resizeData) return;
-      const diff = e.clientX - resizeData.startX;
-      const newWidth = Math.max(60, resizeData.startWidth + diff);
-      if (newWidth === resizeData.newWidth) {
-        return;
-      }
-      resizeData.newWidth = newWidth;
-      columnWidths[resizeData.columnName] = newWidth;
-
-      if (!rafHandle) {
-        rafHandle = window.requestAnimationFrame(applyColumnWidth);
-      }
-    }
-
-    function onMouseUp() {
-      if (rafHandle) {
-        window.cancelAnimationFrame(rafHandle);
-        applyColumnWidth();
-        rafHandle = 0;
-      }
-      if (resizeData) {
-        resizeData.handle?.classList.remove('active');
-      }
-      resizeData = null;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    }
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  });
-
   schemaGraph.addEventListener('keydown', async (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') {
       return;
@@ -434,14 +383,17 @@ function handleGlobalKeyDown(event) {
       return;
     }
     event.preventDefault();
-    void applyTextEditingShortcut(event.target, textAction, { writeClipboardText, readClipboardText });
+    void applyTextEditingShortcut(event.target, textAction, {
+      writeClipboardText: clipboard.writeText,
+      readClipboardText: clipboard.readText,
+    });
     return;
   }
 
   if (event.key === 'Escape' && !document.querySelector('dialog[open]')) {
     event.preventDefault();
     event.stopPropagation();
-    clearGridSelection();
+    gridSelection.reset({ updateRendered: true });
     return;
   }
 
@@ -461,12 +413,12 @@ function handleGlobalKeyDown(event) {
     const selectedText = window.getSelection?.().toString() ?? '';
     if (!selectedText) {
       const targetCell = event.target.closest?.('[data-grid-cell-row]');
-      const rowIndex = targetCell ? Number(targetCell.dataset.gridCellRow) : selectedCell?.rowIndex;
-      const columnName = targetCell?.dataset.gridCellColumn ?? selectedCell?.columnName;
+      const rowIndex = targetCell ? Number(targetCell.dataset.gridCellRow) : gridSelection.selectedCell?.rowIndex;
+      const columnName = targetCell?.dataset.gridCellColumn ?? gridSelection.selectedCell?.columnName;
       if (Number.isInteger(rowIndex) && columnName) {
         event.preventDefault();
         event.stopPropagation();
-        selectGridCell(rowIndex, columnName);
+        gridSelection.selectCell(rowIndex, columnName);
         void copyGridCell(rowIndex, columnName);
         return;
       }
@@ -493,7 +445,7 @@ function handleGlobalKeyDown(event) {
     }
     event.preventDefault();
     event.stopPropagation();
-    requestSave();
+    documentController.requestSave();
   }
 }
 
@@ -521,7 +473,12 @@ async function handleInput(event) {
   }
 }
 
-async function openDatabase(name, data, { dirty = false, revision = 0, resetViewState = true } = {}) {
+async function openDatabase(name, data, {
+  dirty = false,
+  revision = 0,
+  resetViewState = true,
+  walWarning = '',
+} = {}) {
   try {
     elements.status.textContent = 'Opening database...';
     SQL ??= await initSqlJs({ locateFile: () => wasmUri });
@@ -533,11 +490,9 @@ async function openDatabase(name, data, { dirty = false, revision = 0, resetView
     rowCountCache.clear();
     databaseName = name;
     elements.title.textContent = name;
+    renderWalWarning(walWarning);
     if (resetViewState) {
-      selectedRow = null;
-      selectedCell = null;
-      selectedRowKeys.clear();
-      lastSelectedRowIndex = null;
+      gridSelection.reset();
       page = 1;
       filter = '';
       pinnedRows.clear();
@@ -548,15 +503,10 @@ async function openDatabase(name, data, { dirty = false, revision = 0, resetView
       sortColumn = null;
       sortDirection = 'asc';
     }
-    isDirty = Boolean(dirty);
-    currentRevision = Number.isInteger(revision) ? revision : 0;
-    isSaving = false;
-    pendingSaveRequestIds.clear();
-    shouldSaveAfterCompletion = false;
+    documentController.load({ dirty, revision });
     await refreshTables();
-    updateSaveUi();
   } catch (error) {
-    reportError(error);
+    documentController.reportError(error);
   }
 }
 
@@ -594,19 +544,17 @@ function handleLoadError(message, settings) {
   db = null;
   tables = [];
   schemaObjects = [];
-  activeTableName = null;
-  selectedSchemaObject = null;
+  schemaSelection.clear();
   visibleRows = [];
   totalRows = 0;
-  isDirty = false;
-  isSaving = false;
+  documentController.close();
   elements.title.textContent = 'SQLite database not opened';
+  renderWalWarning('');
   elements.status.textContent = message;
   elements.grid.replaceChildren(createElement('div', { className: 'error-state', text: message }));
   schemaView.renderSidebar();
   schemaView.renderSchema();
-  updatePager();
-  updateSaveUi();
+  editorControls.render();
 }
 
 function getQueryOptions() {
@@ -624,81 +572,9 @@ function scheduleRefreshRows() {
   }, 120);
 }
 
-function buildAutoCommitStatusSuffix() {
-  return getInstantCommitAction({
-    strategy: editorSettings.instantCommit,
-    isRemote: editorSettings.isRemote,
-  }) === 'save'
-    ? ' · saving automatically'
-    : '';
-}
-
-function maybeAutoCommit() {
-  if (getInstantCommitAction({ strategy: editorSettings.instantCommit, isRemote: editorSettings.isRemote }) === 'save') {
-    window.setTimeout(() => requestSave(), 0);
-  }
-}
-
-function handleDatabaseSaved(dirty = false, revision = currentRevision, requestId = '') {
-  if (requestId.startsWith('ui-save-') && !pendingSaveRequestIds.has(requestId)) {
-    return;
-  }
-  pendingSaveRequestIds.delete(requestId);
-  const acknowledgedRevision = Number(revision);
-  isDirty = Boolean(dirty) || acknowledgedRevision !== currentRevision;
-  isSaving = false;
-  const shouldRetry = shouldSaveAfterCompletion && isDirty;
-  shouldSaveAfterCompletion = false;
-  updateSaveUi();
-  if (shouldRetry) {
-    window.setTimeout(() => requestSave(), 0);
-  }
-}
-
-function handleDatabaseSaveFailed(message, requestId = '') {
-  if (requestId.startsWith('ui-save-') && !pendingSaveRequestIds.has(requestId)) {
-    return;
-  }
-  pendingSaveRequestIds.delete(requestId);
-  shouldSaveAfterCompletion = false;
-  isDirty = true;
-  isSaving = false;
-  updateSaveUi();
-  elements.status.textContent = `Save failed: ${message}`;
-}
-
-function requestSave() {
-  if (!db || !isDirty) {
-    return;
-  }
-  if (isSaving) {
-    shouldSaveAfterCompletion = true;
-    return;
-  }
-
-  isSaving = true;
-  shouldSaveAfterCompletion = false;
-  const requestId = `ui-save-${++saveRequestCounter}`;
-  pendingSaveRequestIds.add(requestId);
-  updateSaveUi();
-  vscode.postMessage({
-    type: 'requestSave',
-    requestId,
-    revision: currentRevision,
-  });
-}
-
-function updateSaveUi() {
-  const hasDatabase = Boolean(db);
-  const saveState = getSaveButtonState({ hasDatabase, isDirty, isSaving });
-  elements.saveButton.disabled = saveState.disabled;
-  elements.saveButton.textContent = saveState.label;
-  elements.status.textContent = getDirtyStatusText({ hasDatabase, isDirty, isSaving });
-}
-
 function updateRefreshUi() {
   const hasDatabase = Boolean(db);
-  const hasActiveTable = Boolean(getActiveTable());
+  const hasActiveTable = Boolean(schemaSelection.activeTable);
   const objectState = getRefreshButtonState({
     target: 'objects',
     hasDatabase,
@@ -715,14 +591,11 @@ function updateRefreshUi() {
 
 async function refreshTables() {
   const generation = ++metadataLoadGeneration;
-  const revision = currentRevision;
+  const revision = documentController.revision;
   schemaObjects = getSchemaObjects(db);
   tables = readTableMetadata(db, schemaObjects);
 
-  activeTableName = activeTableName && tables.some((table) => table.name === activeTableName)
-    ? activeTableName
-    : tables[0]?.name ?? null;
-  selectedSchemaObject = resolveSchemaSelection(schemaObjects, selectedSchemaObject, activeTableName);
+  schemaSelection.reconcile();
   schemaView.renderSidebar();
   schemaView.renderSchema();
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
@@ -730,7 +603,7 @@ async function refreshTables() {
   void loadTableCountsInBackground({
     objects: tables,
     schedule: () => new Promise((resolve) => window.setTimeout(resolve, 0)),
-    isCurrent: () => generation === metadataLoadGeneration && revision === currentRevision,
+    isCurrent: () => generation === metadataLoadGeneration && revision === documentController.revision,
     load: (table) => rowCountCache.get({
       revision,
       objectName: table.name,
@@ -747,29 +620,26 @@ async function refreshTables() {
       schemaView.renderSidebar();
     },
   }).then(() => {
-    if (generation === metadataLoadGeneration && revision === currentRevision) {
+    if (generation === metadataLoadGeneration && revision === documentController.revision) {
       schemaView.renderGraph();
     }
   });
 }
 
 async function refreshRows() {
-  const table = getActiveTable();
+  const table = schemaSelection.activeTable;
   isRefreshingRows = true;
   isLoadingMoreRows = false;
-  selectedRow = null;
-  selectedCell = null;
-  selectedRowKeys.clear();
-  lastSelectedRowIndex = null;
+  gridSelection.reset();
 
   if (!table) {
     totalRows = 0;
     visibleRows = [];
     elements.grid.replaceChildren(createElement('div', { className: 'empty-state', text: 'No tables found.' }));
-    updatePager();
+    editorControls.render();
     updateRefreshUi();
-    updateSelectionUi();
-    postCopilotSelectionContext();
+    gridSelection.updateUi();
+    gridSelection.postContext();
     isRefreshingRows = false;
     return;
   }
@@ -782,7 +652,7 @@ async function refreshRows() {
 
     const filterKey = createRowCountFilterKey(filter, columnFilters);
     const actualTotalRows = rowCountCache.get({
-      revision: currentRevision,
+      revision: documentController.revision,
       objectName: table.name,
       filterKey,
       load: () => countTableRows(db, {
@@ -818,15 +688,15 @@ async function refreshRows() {
     elements.grid.scrollTop = 0;
     lastGridScrollTop = 0;
     isScrollingTowardBottom = true;
-    updatePager();
+    editorControls.render();
   } catch (error) {
     visibleRows = [];
     elements.grid.replaceChildren(createElement('div', { className: 'error-state', text: getErrorMessage(error) }));
   } finally {
     isRefreshingRows = false;
     updateRefreshUi();
-    updateSelectionUi();
-    postCopilotSelectionContext();
+    gridSelection.updateUi();
+    gridSelection.postContext();
     scheduleInfiniteScrollCheck();
   }
 }
@@ -850,7 +720,7 @@ async function refreshUnknownCountRows(table) {
   elements.grid.scrollTop = 0;
   lastGridScrollTop = 0;
   isScrollingTowardBottom = true;
-  updatePager();
+  editorControls.render();
 }
 
 function hasActiveGridFilters() {
@@ -915,7 +785,7 @@ function scheduleInfiniteScrollCheck() {
 }
 
 async function loadMoreRows() {
-  const table = getActiveTable();
+  const table = schemaSelection.activeTable;
   if (!table || isRefreshingRows || isLoadingMoreRows || !editorSettings.autoPagination) {
     return;
   }
@@ -944,7 +814,7 @@ async function loadMoreRows() {
       visibleRows.push(...result.rows);
       totalRows = result.totalRows;
       gridView.render({ bodyOnly: true });
-      updatePager();
+      editorControls.render();
       if (result.hasMore) {
         scheduleInfiniteScrollCheck();
       }
@@ -953,7 +823,7 @@ async function loadMoreRows() {
     const nextRows = readGridRows(table, rowWindow);
     if (nextRows.length === 0) {
       totalRows = visibleRows.length;
-      updatePager();
+      editorControls.render();
       return;
     }
 
@@ -962,38 +832,15 @@ async function loadMoreRows() {
     if (nextRows.length < rowWindow.limit) {
       totalRows = visibleRows.length;
     }
-    updatePager();
+    editorControls.render();
     scheduleInfiniteScrollCheck();
   } catch (error) {
     visibleRows.length = startIndex;
     gridView.render();
-    reportError(error);
+    documentController.reportError(error);
   } finally {
     isLoadingMoreRows = false;
   }
-}
-
-function postCopilotSelectionContext() {
-  const visibleRowOffset = getVisibleRowOffset();
-  const selectedRowNumbers = [];
-  for (let rowIndex = 0; rowIndex < visibleRows.length; rowIndex += 1) {
-    if (selectedRowKeys.has(getRowSelectionKey(visibleRows[rowIndex].identity))) {
-      selectedRowNumbers.push(visibleRowOffset + rowIndex + 1);
-    }
-  }
-  vscode.postMessage({
-    type: 'copilotSelectionChanged',
-    context: getCopilotSelectionContext({
-      table: getActiveTable(),
-      filter,
-      columnFilters,
-      sortColumn,
-      sortDirection,
-      selectedColumns: selectedCell?.columnName ? [selectedCell.columnName] : [],
-      selectedRowCount: selectedRowNumbers.length,
-      selectedRowNumbers,
-    }),
-  });
 }
 
 function focusColumnFilter(columnName) {
@@ -1007,150 +854,23 @@ function getVisibleRowOffset() {
   return editorSettings.autoPagination ? 0 : (page - 1) * pageSize;
 }
 
-function toggleRowSelection(rowIndex, { range = false, additive = true } = {}) {
-  if (!Number.isInteger(rowIndex) || !visibleRows[rowIndex]) {
-    return;
-  }
-
-  if (range && Number.isInteger(lastSelectedRowIndex) && visibleRows[lastSelectedRowIndex]) {
-    const start = Math.min(lastSelectedRowIndex, rowIndex);
-    const end = Math.max(lastSelectedRowIndex, rowIndex);
-    if (!additive) {
-      selectedRowKeys.clear();
-    }
-    for (let index = start; index <= end; index += 1) {
-      selectedRowKeys.add(getRowSelectionKey(visibleRows[index].identity));
-    }
-  } else {
-    const key = getRowSelectionKey(visibleRows[rowIndex].identity);
-    if (selectedRowKeys.has(key)) {
-      selectedRowKeys.delete(key);
-    } else {
-      if (!additive) {
-        selectedRowKeys.clear();
-      }
-      selectedRowKeys.add(key);
-    }
-  }
-  lastSelectedRowIndex = rowIndex;
-  postCopilotSelectionContext();
-}
-
-function selectGridRow(rowIndex) {
-  selectedRow = rowIndex;
-  selectedCell = null;
-  const gridEl = elements.grid.querySelector('.data-grid');
-  gridEl?.querySelectorAll('.selected-row').forEach((row) => row.classList.remove('selected-row'));
-  gridEl?.querySelectorAll('.selected-cell').forEach((cell) => cell.classList.remove('selected-cell'));
-  gridEl?.querySelector(`tr[data-row="${CSS.escape(String(rowIndex))}"]`)?.classList.add('selected-row');
-  postCopilotSelectionContext();
-}
-
-function selectGridCell(rowIndex, columnName) {
-  selectedRow = rowIndex;
-  selectedCell = { rowIndex, columnName };
-  const gridEl = elements.grid.querySelector('.data-grid');
-  gridEl?.querySelectorAll('.selected-row').forEach((row) => row.classList.remove('selected-row'));
-  gridEl?.querySelectorAll('.selected-cell').forEach((cell) => cell.classList.remove('selected-cell'));
-  const row = gridEl?.querySelector(`tr[data-row="${CSS.escape(String(rowIndex))}"]`);
-  row?.classList.add('selected-row');
-  row?.querySelector(`[data-grid-cell-column="${CSS.escape(columnName)}"]`)?.classList.add('selected-cell');
-  postCopilotSelectionContext();
-}
-
-function clearSelectedRows() {
-  selectedRowKeys.clear();
-  updateSelectionUi();
-}
-
-function clearGridSelection() {
-  selectedRow = null;
-  selectedCell = null;
-  selectedRowKeys.clear();
-  lastSelectedRowIndex = null;
-  const gridEl = elements.grid.querySelector('.data-grid');
-  gridEl?.querySelectorAll('.selected-row, .selected-cell, .multi-selected-row').forEach((element) => {
-    element.classList.remove('selected-row', 'selected-cell', 'multi-selected-row');
-  });
-  syncRenderedSelectionState();
-  postCopilotSelectionContext();
-}
-
-function syncRenderedSelectionState() {
-  const gridEl = elements.grid.querySelector('.data-grid');
-  if (!gridEl) {
-    return;
-  }
-
-  for (const renderedRow of gridEl.querySelectorAll('tr[data-row]')) {
-    const rowIndex = Number(renderedRow.dataset.row);
-    const row = visibleRows[rowIndex];
-    const selected = Boolean(row && selectedRowKeys.has(getRowSelectionKey(row.identity)));
-    renderedRow.classList.toggle('multi-selected-row', selected);
-    const checkbox = renderedRow.querySelector('[data-select-row]');
-    if (checkbox) {
-      checkbox.checked = selected;
-      checkbox.title = selected ? 'Deselect row' : 'Select row';
-    }
-  }
-
-  const selectAllState = getSelectAllRowsState({ visibleRows, selectedRowKeys });
-  const selectAll = gridEl.querySelector('[data-select-all-rows]');
-  if (selectAll) {
-    selectAll.checked = selectAllState.checked;
-    selectAll.indeterminate = selectAllState.indeterminate;
-    selectAll.title = selectAllState.checked ? 'Deselect visible rows' : 'Select visible rows';
-  }
-  updateSelectionUi();
-}
-
 async function smartDeleteSelection() {
-  const selectedRows = getVisibleSelectedRows();
-  if (selectedRows.length > 0) {
-    await deleteRows(selectedRows, { invoker: document.activeElement });
+  if (gridSelection.selectedRows.length > 0) {
+    await rowWorkflows.deleteSelected(document.activeElement);
     return;
   }
 
-  const table = getEditableTable();
-  if (!table) {
+  if (gridSelection.selectedCell) {
+    await rowWorkflows.clearCell(
+      gridSelection.selectedCell.rowIndex,
+      gridSelection.selectedCell.columnName,
+      document.activeElement,
+    );
     return;
   }
 
-  if (selectedCell) {
-    const row = visibleRows[selectedCell.rowIndex];
-    const column = table.columns.find((candidate) => candidate.name === selectedCell.columnName);
-    if (row && column && column.canUpdate !== false && !column.readOnly && !(row.values[column.name] instanceof Uint8Array)) {
-      const confirmed = await confirmDestructiveAction(createConfirmationModel({
-        kind: 'cell',
-        tableName: table.name,
-        columnName: column.name,
-        rowNumber: getVisibleRowOffset() + selectedCell.rowIndex + 1,
-      }), document.activeElement);
-      if (confirmed) {
-        await updateCell(table, row, column, null, row.values[column.name]);
-        elements.status.textContent = `Cleared ${column.name}${buildAutoCommitStatusSuffix()}`;
-      }
-    }
-    return;
-  }
-
-  if (selectedRow !== null) {
-    await deleteRows([visibleRows[selectedRow]].filter(Boolean), { invoker: document.activeElement });
-  }
-}
-
-function getVisibleSelectedRows() {
-  return getSelectedVisibleRows({ visibleRows, selectedRowKeys });
-}
-
-function updateSelectionUi() {
-  const selectedCount = getVisibleSelectedRows().length;
-  const table = getActiveTable();
-  if (elements.deleteSelectedRows) {
-    elements.deleteSelectedRows.disabled = !table || table.type !== 'table' || selectedCount === 0;
-    elements.deleteSelectedRows.textContent = selectedCount > 0
-      ? `Delete selected (${selectedCount.toLocaleString()})`
-      : 'Delete selected';
+  if (gridSelection.selectedRow !== null) {
+    await rowWorkflows.deleteAt(gridSelection.selectedRow, document.activeElement);
   }
 }
 
@@ -1161,17 +881,17 @@ async function copyGridCell(rowIndex, columnName) {
   }
 
   const value = row.values[columnName];
-  await writeClipboardText(getCellClipboardText(value));
+  await clipboard.writeText(getCellClipboardText(value));
   elements.status.textContent = `Copied ${columnName}`;
 }
 
 async function copyRows(format) {
-  const table = getActiveTable();
+  const table = schemaSelection.activeTable;
   if (!table || visibleRows.length === 0) {
     return;
   }
 
-  const selectedVisibleRows = getVisibleSelectedRows();
+  const selectedVisibleRows = gridSelection.selectedRows;
   const usedSelection = selectedVisibleRows.length > 0;
   const sourceRows = usedSelection ? selectedVisibleRows : visibleRows;
   const rows = sourceRows.map((row) => row.values);
@@ -1182,32 +902,11 @@ async function copyRows(format) {
     columns,
     rows,
   });
-  await writeClipboardText(content);
+  await clipboard.writeText(content);
   const label = ROW_COPY_FORMATS.find((item) => item.value === format)?.label ?? format;
   elements.status.textContent = usedSelection
     ? `Copied ${rows.length.toLocaleString()} selected ${rows.length === 1 ? 'row' : 'rows'} as ${label}`
     : `Copied ${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'} as ${label}`;
-}
-
-async function writeClipboardText(text) {
-  vscode.postMessage({ type: 'clipboardWrite', text });
-}
-
-async function readClipboardText() {
-  const requestId = String(++clipboardRequestId);
-  vscode.postMessage({ type: 'clipboardRead', requestId });
-  return new Promise((resolve) => {
-    const timeout = window.setTimeout(() => {
-      pendingClipboardReads.delete(requestId);
-      resolve('');
-    }, 2000);
-    pendingClipboardReads.set(requestId, {
-      resolve: (text) => {
-        window.clearTimeout(timeout);
-        resolve(text);
-      },
-    });
-  });
 }
 
 async function handleClick(event) {
@@ -1226,18 +925,7 @@ async function handleClick(event) {
   const selectAllRows = event.target.closest('[data-select-all-rows]');
   if (selectAllRows) {
     event.stopPropagation();
-    const state = getSelectAllRowsState({ visibleRows, selectedRowKeys });
-    if (state.checked || state.indeterminate) {
-      for (const row of visibleRows) {
-        selectedRowKeys.delete(getRowSelectionKey(row.identity));
-      }
-    } else {
-      for (const row of visibleRows) {
-        selectedRowKeys.add(getRowSelectionKey(row.identity));
-      }
-    }
-    syncRenderedSelectionState();
-    postCopilotSelectionContext();
+    gridSelection.toggleAll();
     return;
   }
 
@@ -1247,9 +935,9 @@ async function handleClick(event) {
     const rowIndex = Number(selectRow.dataset.selectRow);
     const row = visibleRows[rowIndex];
     if (row) {
-      toggleRowSelection(rowIndex, { range: event.shiftKey, additive: true });
-      selectGridRow(rowIndex);
-      syncRenderedSelectionState();
+      gridSelection.toggle(rowIndex, { range: event.shiftKey, additive: true });
+      gridSelection.selectRow(rowIndex);
+      gridSelection.syncRendered();
     }
     return;
   }
@@ -1276,7 +964,7 @@ async function handleClick(event) {
     } else {
       pinnedRows.add(realRowIndex);
     }
-    selectGridRow(rowIndex);
+    gridSelection.selectRow(rowIndex);
     gridView.render({ bodyOnly: true });
     return;
   }
@@ -1313,12 +1001,12 @@ async function handleClick(event) {
   if (gridCell) {
     const rowIndex = Number(gridCell.dataset.gridCellRow);
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
-      toggleRowSelection(rowIndex, { range: event.shiftKey, additive: event.metaKey || event.ctrlKey || event.shiftKey });
-      selectGridRow(rowIndex);
-      syncRenderedSelectionState();
+      gridSelection.toggle(rowIndex, { range: event.shiftKey, additive: event.metaKey || event.ctrlKey || event.shiftKey });
+      gridSelection.selectRow(rowIndex);
+      gridSelection.syncRendered();
       return;
     }
-    selectGridCell(rowIndex, gridCell.dataset.gridCellColumn);
+    gridSelection.selectCell(rowIndex, gridCell.dataset.gridCellColumn);
     return;
   }
 
@@ -1326,12 +1014,12 @@ async function handleClick(event) {
   if (row) {
     const rowIndex = Number(row.dataset.row);
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
-      toggleRowSelection(rowIndex, { range: event.shiftKey, additive: event.metaKey || event.ctrlKey || event.shiftKey });
-      selectGridRow(rowIndex);
-      syncRenderedSelectionState();
+      gridSelection.toggle(rowIndex, { range: event.shiftKey, additive: event.metaKey || event.ctrlKey || event.shiftKey });
+      gridSelection.selectRow(rowIndex);
+      gridSelection.syncRendered();
       return;
     }
-    selectGridRow(rowIndex);
+    gridSelection.selectRow(rowIndex);
     return;
   }
 }
@@ -1349,7 +1037,7 @@ function handleDoubleClick(event) {
 
   const rowIndex = Number(gridCell.dataset.gridCellRow);
   const columnName = gridCell.dataset.gridCellColumn;
-  const table = getActiveTable();
+  const table = schemaSelection.activeTable;
   const row = visibleRows[rowIndex];
   const column = table?.columns.find((candidate) => candidate.name === columnName);
   const canInlineEdit = Boolean(table?.type === 'table' && row && column && column.canUpdate !== false && !column.readOnly && !(row.values[column.name] instanceof Uint8Array));
@@ -1366,11 +1054,9 @@ function handleDoubleClick(event) {
 }
 
 async function selectTable(tableName) {
-  if (!tableName || !tables.some((table) => table.name === tableName)) {
+  if (!schemaSelection.selectTable(tableName)) {
     return;
   }
-  activeTableName = tableName;
-  selectedSchemaObject = schemaObjects.find((object) => object.name === tableName) ?? null;
   page = 1;
   columnFilters = {};
   sortColumn = null;
@@ -1383,11 +1069,9 @@ async function selectTable(tableName) {
 }
 
 function selectSchemaObject(type, name) {
-  const object = schemaObjects.find((candidate) => candidate.type === type && candidate.name === name);
-  if (!object) {
+  if (!schemaSelection.selectObject(type, name)) {
     return;
   }
-  selectedSchemaObject = object;
   setActiveView('schema');
   setActiveSchemaView('ddl');
   schemaView.renderSidebar();
@@ -1432,16 +1116,16 @@ async function runAction(action, sourceElement = null) {
       await sqlWorkspace.run();
       break;
     case 'export-csv':
-      exportVisibleCsv();
+      exportWorkflow.exportCsv();
       break;
     case 'import-csv':
       await csvImportWorkflow.requestImport();
       break;
     case 'export-sql':
-      exportSqlDump();
+      exportWorkflow.exportSql();
       break;
     case 'save-database':
-      requestSave();
+      documentController.requestSave();
       break;
     case 'schema-view-graph':
       setActiveSchemaView('graph');
@@ -1455,6 +1139,9 @@ async function runAction(action, sourceElement = null) {
     case 'schema-graph-layout':
       schemaView.renderGraph();
       schemaView.fitGraph();
+      break;
+    case 'check-database-health':
+      databaseHealthWorkflow.run();
       break;
     case 'new-table':
       schemaWorkflows.createTable();
@@ -1504,6 +1191,11 @@ function setActiveSchemaView(view) {
   elements.schemaGraphSummary.classList.toggle('hidden', !graphActive);
 }
 
+function renderWalWarning(message) {
+  elements.databaseWarning.textContent = message || '';
+  elements.databaseWarning.classList.toggle('hidden', !message);
+}
+
 function confirmDestructiveAction(model, invoker = document.activeElement) {
   return showConfirmation({
     model,
@@ -1513,14 +1205,13 @@ function confirmDestructiveAction(model, invoker = document.activeElement) {
 }
 
 async function applySchemaChange(sql, {
-  nextActiveTableName = activeTableName,
-  nextSchemaObject = selectedSchemaObject,
+  nextActiveTableName = schemaSelection.activeTableName,
+  nextSchemaObject = schemaSelection.selectedObject,
 } = {}) {
   try {
     runWrite(db, sql);
-    activeTableName = nextActiveTableName;
-    selectedSchemaObject = nextSchemaObject;
-    markChanged();
+    schemaSelection.set({ activeTableName: nextActiveTableName, selectedObject: nextSchemaObject });
+    documentController.markChanged();
     await refreshTables();
     return { ok: true };
   } catch (error) {
@@ -1539,126 +1230,4 @@ function showSchemaDialog({ title, description, submitText, fields, onSubmit }) 
     onSubmit,
     fallbackFocus: () => elements.schemaDdlButton,
   });
-}
-
-function exportVisibleCsv() {
-  const table = getActiveTable();
-  if (!table) {
-    return;
-  }
-
-  const columns = table.columns.map((column) => column.name);
-  const rows = visibleRows.map((row) => row.values);
-  vscode.postMessage({
-    type: 'saveText',
-    kind: 'csv',
-    fileName: `${safeFileName(`${databaseName}-${table.name}`)}.csv`,
-    content: toCsv(columns, rows),
-  });
-}
-
-function exportSqlDump() {
-  if (!db) {
-    return;
-  }
-  const transition = transitionSqlExport(sqlExportState, {
-    type: 'start',
-    databaseName,
-    revision: currentRevision,
-  });
-  sqlExportState = transition.state;
-  if (!transition.handled) {
-    return;
-  }
-  vscode.postMessage(transition.message);
-  updatePager();
-}
-
-function handleSqlExportFinished(message) {
-  const transition = transitionSqlExport(sqlExportState, {
-    ...message,
-    type: 'finish',
-  });
-  if (!transition.handled) {
-    return;
-  }
-  sqlExportState = transition.state;
-  if (transition.statusMessage) {
-    elements.status.textContent = transition.statusMessage;
-  }
-  updatePager();
-}
-
-function updatePager() {
-  const table = getActiveTable();
-  const pager = getPagerState({
-    page,
-    pageSize,
-    filteredRows: totalRows,
-    totalRows: table?.rowCount ?? totalRows,
-    autoPagination: editorSettings.autoPagination,
-    loadedRows: visibleRows.length,
-  });
-  elements.pageLabel.textContent = `${pager.label}`;
-  elements.pageRowCount.textContent = table
-    ? table.rowCount === null
-      ? `${formatRowCount(null)} · ${visibleRows.length.toLocaleString()} loaded`
-      : editorSettings.maxRows > 0 && table.rowCount > totalRows
-      ? `${totalRows.toLocaleString()} of ${table.rowCount.toLocaleString()} rows shown`
-      : `${table.rowCount.toLocaleString()} row${table.rowCount !== 1 ? 's' : ''} total`
-    : '';
-  elements.previousPage.disabled = !pager.canGoPrevious;
-  elements.nextPage.disabled = !pager.canGoNext;
-  elements.previousPage.classList.toggle('hidden', editorSettings.autoPagination);
-  elements.nextPage.classList.toggle('hidden', editorSettings.autoPagination);
-  const editable = table?.type === 'table';
-  const selectedSchemaTable = getSelectedSchemaObject()?.type === 'table' ? table : null;
-  const schemaEditable = selectedSchemaTable?.name === table?.name && editable;
-  elements.addRow.disabled = !editable;
-  elements.importCsv.disabled = !editable;
-  elements.deleteSelectedRows.disabled = !editable || getVisibleSelectedRows().length === 0;
-  elements.renameTable.disabled = !schemaEditable;
-  elements.addColumn.disabled = !schemaEditable;
-  elements.dropColumn.disabled = !schemaEditable || table.columns.length === 0;
-  elements.dropTable.disabled = !schemaEditable;
-  elements.exportCsv.disabled = !table;
-  const sqlExportUi = getSqlExportUiState(sqlExportState, { hasTables: tables.length > 0 });
-  elements.exportSql.disabled = sqlExportUi.disabled;
-  elements.exportSql.textContent = sqlExportUi.label;
-}
-
-function getActiveTable() {
-  return tables.find((table) => table.name === activeTableName) ?? null;
-}
-
-function getSelectedSchemaObject() {
-  return schemaObjects.find((object) => (
-    object.type === selectedSchemaObject?.type && object.name === selectedSchemaObject?.name
-  )) ?? null;
-}
-
-function getEditableTable() {
-  const table = getActiveTable();
-  return table?.type === 'table' ? table : null;
-}
-
-function markChanged() {
-  const exported = db.export();
-  const baseRevision = currentRevision;
-  currentRevision += 1;
-  isDirty = true;
-  updateSaveUi();
-  vscode.postMessage({
-    type: 'databaseChanged',
-    label: 'Edit SQLite database',
-    baseRevision,
-    data: exported.buffer.slice(exported.byteOffset, exported.byteOffset + exported.byteLength),
-  });
-  maybeAutoCommit();
-}
-
-function reportError(error) {
-  const message = getErrorMessage(error);
-  elements.status.textContent = message;
-  vscode.postMessage({ type: 'error', message });
 }

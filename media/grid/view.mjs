@@ -14,6 +14,7 @@ import {
   getRowNumberColumnStyle,
   getRowSelectionKey,
   getSelectAllRowsState,
+  getShiftedPinnedColumnLeft,
   ROW_NUMBER_COLUMN_WIDTH,
 } from './ui.mjs';
 
@@ -78,6 +79,86 @@ export function createGridView({ elements, getState, updateSelectionUi }) {
       const width = Math.round(handle.closest('th')?.offsetWidth ?? 0);
       if (handle.dataset.resizeColumn && width > 0) columnWidths[handle.dataset.resizeColumn] = width;
     }
+  }
+
+  function bindColumnResizing() {
+    let resizeData = null;
+    elements.grid.addEventListener('mousedown', (event) => {
+      const handle = event.target.closest('.col-resize-handle');
+      const columnName = handle?.dataset.resizeColumn;
+      const grid = elements.grid.querySelector('.data-grid');
+      if (!handle || !columnName || !grid) return;
+
+      const columnIndex = Array.from(grid.querySelectorAll('.column-heading-row th')).findIndex((heading) => (
+        heading.querySelector(`[data-resize-column="${columnName}"]`)
+      ));
+      if (columnIndex === -1) return;
+
+      event.preventDefault();
+      const startWidth = handle.closest('th')?.offsetWidth || 120;
+      const pinnedCells = columnName === '__rowNumber'
+        ? Array.from(grid.querySelectorAll('th.pinned, td.pinned')).map((cell) => ({
+            cell,
+            startLeft: Number.parseFloat(cell.style.left) || 0,
+          }))
+        : [];
+      let frame = 0;
+      resizeData = {
+        columnName,
+        columnIndex,
+        gridRows: Array.from(grid.querySelectorAll('tr')),
+        handle,
+        newWidth: startWidth,
+        pinnedCells,
+        startWidth,
+        startX: event.clientX,
+      };
+      handle.classList.add('active');
+
+      function applyWidth() {
+        if (!resizeData) return;
+        const width = resizeData.newWidth;
+        for (const row of resizeData.gridRows) {
+          const cell = row.children[resizeData.columnIndex];
+          if (cell) {
+            cell.style.width = `${width}px`;
+            cell.style.minWidth = `${width}px`;
+            cell.style.maxWidth = `${width}px`;
+          }
+        }
+        for (const pinned of resizeData.pinnedCells) {
+          pinned.cell.style.left = `${getShiftedPinnedColumnLeft({
+            startLeft: pinned.startLeft,
+            startWidth: resizeData.startWidth,
+            newWidth: width,
+          })}px`;
+        }
+        frame = 0;
+      }
+
+      function handleMouseMove(moveEvent) {
+        if (!resizeData) return;
+        const width = Math.max(60, resizeData.startWidth + moveEvent.clientX - resizeData.startX);
+        if (width === resizeData.newWidth) return;
+        resizeData.newWidth = width;
+        getState().columnWidths[resizeData.columnName] = width;
+        frame ||= window.requestAnimationFrame(applyWidth);
+      }
+
+      function handleMouseUp() {
+        if (frame) {
+          window.cancelAnimationFrame(frame);
+          applyWidth();
+        }
+        resizeData?.handle.classList.remove('active');
+        resizeData = null;
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      }
+
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    });
   }
 
   function clearResources() {
@@ -221,7 +302,7 @@ export function createGridView({ elements, getState, updateSelectionUi }) {
     checkbox.title = state.checked ? 'Deselect visible rows' : 'Select visible rows';
   }
 
-  return { clearResources, rememberWidths, render, schedule };
+  return { bindColumnResizing, clearResources, rememberWidths, render, schedule };
 }
 
 function columnBadges(column) {

@@ -59,7 +59,7 @@ export type DatabaseSavedMessage = {
 };
 
 export type ExtensionMessage =
-  | { type: 'loadDatabase'; name: string; data: ArrayBuffer; settings: EditorSettings; dirty: boolean; revision: number; resetViewState: boolean }
+  | { type: 'loadDatabase'; name: string; data: ArrayBuffer; settings: EditorSettings; dirty: boolean; revision: number; resetViewState: boolean; walWarning?: string }
   | { type: 'loadError'; message: string; settings: EditorSettings }
   | { type: 'settingsChanged'; settings: EditorSettings }
   | DatabaseSavedMessage

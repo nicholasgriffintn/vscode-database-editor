@@ -52,9 +52,15 @@ test('media root stays an entrypoint instead of becoming a flat feature namespac
 
 test('webview entrypoint remains orchestration-only', async () => {
   const source = await readFile(new URL('../media/webview.mjs', import.meta.url), 'utf8');
-  assert.ok(source.split('\n').length <= 1800, 'webview.mjs must stay below 1,800 lines');
-  assert.doesNotMatch(source, /function (?:showRowDetails|showInsertDialog|showCreateIndexDialog|renderSchemaGraph|renderGrid|runSqlWorkspace|createSchemaField|parseCsv)\(/);
+  assert.ok(source.split('\n').length <= 1300, 'webview.mjs must stay below 1,300 lines');
+  assert.doesNotMatch(source, /function (?:showRowDetails|showInsertDialog|showCreateIndexDialog|renderSchemaGraph|renderGrid|runSqlWorkspace|createSchemaField|parseCsv|reportError|markChanged|getActiveTable|getEditableTable|getSelectedSchemaObject|toggleRowSelection|selectGridRow|selectGridCell|writeClipboardText|readClipboardText|updatePager|exportVisibleCsv|exportSqlDump|handleSqlExportFinished)\(/);
+  assert.doesNotMatch(source, /await (?:deleteRows|updateCell)\(/, 'row mutations must go through createRowWorkflows');
   assert.match(source, /createGridView/);
+  assert.match(source, /createGridSelection/);
+  assert.match(source, /createDocumentController/);
+  assert.match(source, /createSchemaSelection/);
+  assert.match(source, /createClipboardBridge/);
+  assert.match(source, /createExportWorkflow/);
   assert.match(source, /createRowWorkflows/);
   assert.match(source, /createSchemaView/);
   assert.match(source, /createSqlWorkspace/);
