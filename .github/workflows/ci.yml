@@ -32,18 +32,33 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify vendored sql.js runtime
+        run: pnpm run vendor:sqljs:check
+
       - name: Run unit tests
         run: pnpm run test:unit
 
       - name: Run Extension Development Host integration tests
         run: xvfb-run -a pnpm run test:integration
 
+      - name: Verify generated fixture standards
+        run: pnpm run test:fixture
+
+      - name: Audit production dependencies
+        run: pnpm run audit:prod
+
+      - name: Reject generated differences
+        run: git diff --exit-code
+
       - name: Build VSIX
         run: pnpm run vsce:package
+
+      - name: Inspect VSIX archive
+        run: pnpm run vsce:verify
 
       - name: Upload VSIX
         uses: actions/upload-artifact@v7
         with:
           name: vscode-database-editor-vsix
-          path: '*.vsix'
+          path: .tmp/release/vscode-database-editor.vsix
           if-no-files-found: error

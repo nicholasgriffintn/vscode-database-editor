@@ -25,6 +25,25 @@ test('extension host and webview share the same editor setting defaults', () => 
   assert.equal(readEditorSettings({ get: (_section, defaultValue) => defaultValue }, true).isRemote, true);
 });
 
+test('extension host normalizes unsafe configured values before enforcing limits', () => {
+  const invalid = {
+    maxFileSizeMb: -1,
+    defaultPageSize: 0,
+    autoPagination: 'yes',
+    maxRows: -1,
+    instantCommit: 'sometimes',
+    doubleClickBehavior: 'unknown',
+    blobExportMode: 'other',
+    queryTimeoutMs: 20,
+    maxUndoMemoryBytes: 5,
+  };
+  const settings = readEditorSettings({
+    get(section, defaultValue) { return invalid[section] ?? defaultValue; },
+  }, false);
+
+  assert.deepEqual(settings, DEFAULT_EDITOR_SETTINGS);
+});
+
 test('normalizes editor settings with safe defaults and bounds', () => {
   assert.deepEqual(normalizeEditorSettings({}), DEFAULT_EDITOR_SETTINGS);
   assert.deepEqual(normalizeEditorSettings({

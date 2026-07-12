@@ -7,11 +7,11 @@ const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
 const changelog = await readFile(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
 const vscodeIgnore = await readFile(new URL('../.vscodeignore', import.meta.url), 'utf8');
 
-test('Marketplace metadata describes the v1 SQLite editor without changing the release version early', () => {
+test('Marketplace metadata describes the v1 SQLite editor without bypassing Changesets versioning', () => {
   assert.equal(manifest.description, 'Browse, edit, query, import, and export SQLite databases directly in VS Code.');
   assert.equal(manifest.version, '0.0.6');
-  assert.match(changelog, /^## 1\.0\.0$/m);
-  assert.match(changelog, /WAL sidecars/);
+  assert.match(changelog, /^# vscode-database-editor$/m);
+  assert.match(changelog, /^## 0\.0\.6$/m);
 });
 
 test('README documents every contributed command and setting', () => {

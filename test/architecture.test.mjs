@@ -79,3 +79,9 @@ test('exported media functions have a single owning module', async () => {
     }
   }
 });
+
+test('custom editor provider disposes its owned emitters', async () => {
+  const source = await readFile(new URL('../src/extension.ts', import.meta.url), 'utf8');
+  assert.match(source, /context\.subscriptions\.push\(\s*provider,/);
+  assert.match(source, /dispose\(\): void \{[\s\S]{0,200}changeEmitter\.dispose\(\)[\s\S]{0,200}postedMessageEmitter\.dispose\(\)/);
+});

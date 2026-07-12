@@ -75,6 +75,7 @@ export function activate(context: vscode.ExtensionContext): SqliteExtensionTestA
   sqliteParticipant.followupProvider = createSqliteFollowupProvider();
 
   context.subscriptions.push(
+    provider,
     vscode.window.registerCustomEditorProvider(viewType, provider, {
       webviewOptions: {
         retainContextWhenHidden: true,
@@ -136,7 +137,7 @@ export function deactivate(): void {
   // VS Code disposes registered providers through the extension context.
 }
 
-class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument> {
+class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument>, vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<SnapshotChangeEvent<SqliteDocument>>();
   private readonly postedMessageEmitter = new vscode.EventEmitter<{ uri: string; message: ExtensionMessage }>();
   private readonly registry = new SqliteDocumentRegistry<SqliteDocument>();
@@ -146,6 +147,11 @@ class SqliteEditorProvider implements vscode.CustomEditorProvider<SqliteDocument
   readonly onDidChangeCustomDocument = this.changeEmitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  dispose(): void {
+    this.changeEmitter.dispose();
+    this.postedMessageEmitter.dispose();
+  }
 
   createTestApi(): SqliteExtensionTestApi {
     return {

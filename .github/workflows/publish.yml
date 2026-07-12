@@ -10,10 +10,15 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: visual-studio-marketplace-publish
+  cancel-in-progress: false
+
 jobs:
   marketplace:
     name: Publish to Visual Studio Marketplace
     runs-on: ubuntu-latest
+    environment: visual-studio-marketplace
 
     steps:
       - name: Check out repository
@@ -33,11 +38,35 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test
-        run: pnpm test
+      - name: Verify release tag matches package version
+        if: github.event_name == 'release'
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          test "${GITHUB_REF_NAME#v}" = "$PACKAGE_VERSION"
+
+      - name: Run release validation
+        run: xvfb-run -a pnpm run test:release
+
+      - name: Audit production dependencies
+        run: pnpm run audit:prod
+
+      - name: Reject generated differences
+        run: git diff --exit-code
 
       - name: Build VSIX
         run: pnpm run vsce:package
+
+      - name: Inspect VSIX archive
+        run: pnpm run vsce:verify
+
+      - name: Verify version is not already published
+        run: |
+          PACKAGE_ID=$(node -p "require('./package.json').publisher + '.' + require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if pnpm exec vsce show "$PACKAGE_ID" --json | node -e "let data=''; process.stdin.on('data', chunk => data += chunk); process.stdin.on('end', () => { const version=process.argv[1]; const parsed=JSON.parse(data); process.exit(parsed.versions?.some(item => item.version === version) ? 0 : 1); });" "$PACKAGE_VERSION"; then
+            echo "$PACKAGE_ID@$PACKAGE_VERSION is already published" >&2
+            exit 1
+          fi
 
       - name: Azure login
         uses: azure/login@v3
@@ -47,4 +76,4 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Publish VSIX
-        run: pnpm exec vsce publish --no-dependencies --allow-missing-repository --packagePath ./*.vsix --azure-credential
+        run: pnpm exec vsce publish --no-dependencies --allow-missing-repository --packagePath .tmp/release/vscode-database-editor.vsix --azure-credential

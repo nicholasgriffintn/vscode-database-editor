@@ -5,6 +5,8 @@ scripts/**
 website/**
 wrangler.toml
 .github/**
+.changeset/**
+.hermes/**
 .tmp/**
 coverage/**
 *.ts
