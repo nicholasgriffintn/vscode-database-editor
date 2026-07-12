@@ -17,8 +17,14 @@ export function getGridWindow({
     .sort((left, right) => left - right);
   const unpinnedCount = normalizedRowCount - pinnedRowIndexes.length;
 
+  const normalizedViewportHeight = Math.max(0, Number(viewportHeight) || 0);
+  const clampedScrollTop = Math.min(
+    Math.max(0, Number(scrollTop) || 0),
+    Math.max(0, unpinnedCount * normalizedRowHeight - normalizedViewportHeight) + pinnedRowIndexes.length * normalizedRowHeight,
+  );
+
   const pinnedHeight = pinnedRowIndexes.length * normalizedRowHeight;
-  const unpinnedScrollTop = Math.max(0, (Number(scrollTop) || 0) - pinnedHeight);
+  const unpinnedScrollTop = Math.max(0, clampedScrollTop - pinnedHeight);
   const firstVisibleOrdinal = Math.floor(unpinnedScrollTop / normalizedRowHeight);
   const visibleCount = Math.max(1, Math.ceil((Number(viewportHeight) || 0) / normalizedRowHeight));
   const startOrdinal = Math.max(0, firstVisibleOrdinal - normalizedOverscan);

@@ -95,6 +95,22 @@ test('virtual grid scroll loads one chunk at the bottom and reports retained row
   }).label, 'Rows 1-1000 of 3000');
 });
 
+test('grid render window clamps stale scroll positions after data refresh', () => {
+  const viewportHeight = 760;
+  const shortTableRows = 4;
+
+  const refreshedWindow = getGridWindow({
+    rowCount: shortTableRows,
+    scrollTop: 2000 * DEFAULT_GRID_ROW_HEIGHT,
+    viewportHeight,
+  });
+
+  assert.equal(refreshedWindow.rowIndexes.at(0), 0);
+  assert.equal(refreshedWindow.rowIndexes.at(-1), shortTableRows - 1);
+  assert.equal(refreshedWindow.topSpacerHeight, 0);
+  assert.equal(refreshedWindow.bottomSpacerHeight, 0);
+});
+
 function getRenderedWindowHeight(gridWindow) {
   const spacerHeights = [gridWindow.topSpacerHeight, gridWindow.bottomSpacerHeight]
     .filter((height) => height > 0)
