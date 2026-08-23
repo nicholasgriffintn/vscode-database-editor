@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "SQLite SQL",
+  "scopeName": "source.sqlite.sql",
+  "patterns": [
+    { "include": "#sqlite-dialect" },
+    { "include": "source.sql" }
+  ],
+  "repository": {
+    "sqlite-dialect": {
+      "patterns": [
+        {
+          "name": "keyword.control.dot-command.sqlite",
+          "match": "^\\s*(\\.(?:backup|bail|databases|dump|echo|headers|help|import|indexes|load|mode|nullvalue|once|open|output|parameter|read|restore|schema|separator|shell|show|tables|timeout|vfsinfo|vfslist|vfsname|width))\\b"
+        },
+        {
+          "name": "keyword.other.pragma.sqlite",
+          "match": "(?i:\\b(PRAGMA)\\b)"
+        },
+        {
+          "name": "keyword.other.sqlite",
+          "match": "(?i:\\b(ABORT|ACTION|AFTER|ANALYZE|ATTACH|AUTOINCREMENT|BEFORE|CONFLICT|DATABASE|DEFERRED|DETACH|EACH|EXCLUSIVE|FAIL|FILTER|GENERATED|GLOB|IF|IGNORE|IMMEDIATE|INDEXED|INSTEAD|MATCH|NO|NOTHING|PLAN|QUERY|RAISE|RECURSIVE|REGEXP|REINDEX|RENAME|REPLACE|RESTRICT|RETURNING|SAVEPOINT|STRICT|STORED|TEMP|TRIGGER|VACUUM|VIRTUAL|WITHOUT)\\b)"
+        },
+        {
+          "name": "storage.type.sqlite",
+          "match": "(?i:\\b(BLOB|BOOLEAN|CLOB|DATE|DATETIME|DOUBLE|INT2|INT8|INTEGER|JSON|MEDIUMINT|NATIVE\\s+CHARACTER|REAL|SMALLINT|TEXT|TINYINT|UNSIGNED\\s+BIG\\s+INT|VARCHAR|VARYING\\s+CHARACTER)\\b)"
+        },
+        {
+          "name": "support.function.sqlite",
+          "match": "(?i:\\b(abs|changes|char|coalesce|concat|concat_ws|date|datetime|format|glob|hex|ifnull|iif|instr|json|json_array|json_array_length|json_extract|json_group_array|json_group_object|json_insert|json_object|json_patch|json_remove|json_replace|json_set|json_type|json_valid|julianday|last_insert_rowid|length|likely|likelihood|lower|ltrim|max|min|nullif|printf|quote|random|randomblob|replace|round|rtrim|sign|soundex|sqlite_compileoption_get|sqlite_compileoption_used|sqlite_offset|sqlite_source_id|sqlite_version|strftime|substr|substring|time|timediff|total_changes|trim|typeof|unhex|unicode|unixepoch|unlikely|upper|zeroblob)\\b(?=\\s*\\()"
+        },
+        {
+          "name": "variable.language.sqlite",
+          "match": "(?i:\\b(NEW|OLD)\\b)"
+        },
+        {
+          "name": "variable.parameter.sqlite",
+          "match": "(?:\\?(?:\\d+)?|[:@$][A-Za-z_][A-Za-z0-9_]*)"
+        },
+        {
+          "name": "constant.numeric.blob.sqlite",
+          "match": "(?i:\\bX'(?:[0-9A-F]{2})*')"
+        }
+      ]
+    }
+  }
+}

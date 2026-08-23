@@ -1,0 +1,77 @@
+{
+  "Create table": {
+    "scope": "sqlite-sql",
+    "prefix": "sqlite-create-table",
+    "description": "Create a SQLite table with an integer primary key",
+    "body": [
+      "CREATE TABLE ${1:table_name} (",
+      "  ${2:id} INTEGER PRIMARY KEY${3: AUTOINCREMENT},",
+      "  ${4:column_name} ${5:TEXT}${6: NOT NULL}",
+      ");"
+    ]
+  },
+  "Insert row": {
+    "scope": "sqlite-sql",
+    "prefix": "sqlite-insert",
+    "description": "Insert a row into a SQLite table",
+    "body": [
+      "INSERT INTO ${1:table_name} (${2:column_name})",
+      "VALUES (${3:value});"
+    ]
+  },
+  "Upsert row": {
+    "scope": "sqlite-sql",
+    "prefix": "sqlite-upsert",
+    "description": "Insert or update a row using SQLite ON CONFLICT",
+    "body": [
+      "INSERT INTO ${1:table_name} (${2:key_column}, ${3:value_column})",
+      "VALUES (${4:key_value}, ${5:value})",
+      "ON CONFLICT (${2:key_column}) DO UPDATE SET",
+      "  ${3:value_column} = excluded.${3:value_column};"
+    ]
+  },
+  "Common table expression": {
+    "scope": "sqlite-sql",
+    "prefix": "sqlite-with",
+    "description": "Create a SQLite common table expression",
+    "body": [
+      "WITH ${1:cte_name} AS (",
+      "  SELECT ${2:*}",
+      "  FROM ${3:table_name}",
+      ")",
+      "SELECT *",
+      "FROM ${1:cte_name};"
+    ]
+  },
+  "Transaction": {
+    "scope": "sqlite-sql",
+    "prefix": "sqlite-transaction",
+    "description": "Wrap statements in an immediate SQLite transaction",
+    "body": [
+      "BEGIN IMMEDIATE;",
+      "",
+      "${1:-- statements}",
+      "",
+      "COMMIT;"
+    ]
+  },
+  "Create index": {
+    "scope": "sqlite-sql",
+    "prefix": "sqlite-create-index",
+    "description": "Create a SQLite index if it does not exist",
+    "body": [
+      "CREATE INDEX IF NOT EXISTS ${1:index_name}",
+      "ON ${2:table_name} (${3:column_name});"
+    ]
+  },
+  "Explain query plan": {
+    "scope": "sqlite-sql",
+    "prefix": "sqlite-explain",
+    "description": "Inspect a SQLite query plan",
+    "body": [
+      "EXPLAIN QUERY PLAN",
+      "SELECT ${1:*}",
+      "FROM ${2:table_name}${3: WHERE condition};"
+    ]
+  }
+}

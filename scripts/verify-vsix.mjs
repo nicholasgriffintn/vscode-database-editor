@@ -5,7 +5,14 @@ import { pathToFileURL } from 'node:url';
 
 const MAX_VSIX_BYTES = 10 * 1024 * 1024;
 
-export function validateVsixContents({ entries, manifest, expectedManifest, expectedMediaPaths, sizeBytes }) {
+export function validateVsixContents({
+  entries,
+  manifest,
+  expectedManifest,
+  expectedMediaPaths,
+  expectedLanguageSupportPaths = [],
+  sizeBytes,
+}) {
   const failures = [];
   const files = new Set(entries);
   const requireFile = (relativePath) => {
@@ -21,6 +28,7 @@ export function validateVsixContents({ entries, manifest, expectedManifest, expe
     'package.json', 'readme.md', 'changelog.md', 'LICENSE.txt', expectedManifest.main.replace(/^\.\//, ''),
     'media/vendor/sqljs/sql-wasm.js', 'media/vendor/sqljs/sql-wasm.wasm', 'media/vendor/sqljs/LICENSE.sql.js',
     ...expectedMediaPaths,
+    ...expectedLanguageSupportPaths,
   ]) requireFile(required);
 
   for (const entry of entries) {
@@ -37,12 +45,20 @@ export async function verifyVsix(vsixPath) {
   const mediaPaths = (await readdir('media', { recursive: true }))
     .filter((entry) => entry.endsWith('.mjs') || entry === 'styles.css')
     .map((entry) => `media/${entry}`);
+  const languageSupportPaths = [
+    ...(expectedManifest.contributes?.languages ?? []).map(({ configuration }) => configuration),
+    ...(expectedManifest.contributes?.grammars ?? []).map(({ path: grammarPath }) => grammarPath),
+    ...(expectedManifest.contributes?.snippets ?? []).map(({ path: snippetsPath }) => snippetsPath),
+  ]
+    .filter((entry) => typeof entry === 'string')
+    .map((entry) => entry.replace(/^\.\//, ''));
   const info = await stat(archive);
   const failures = validateVsixContents({
     entries: listing,
     manifest,
     expectedManifest,
     expectedMediaPaths: mediaPaths,
+    expectedLanguageSupportPaths: [...new Set(languageSupportPaths)],
     sizeBytes: info.size,
   });
   if (failures.length > 0) throw new Error(`VSIX verification failed:\n- ${failures.join('\n- ')}`);

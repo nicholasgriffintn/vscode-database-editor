@@ -20,6 +20,7 @@ A fast, lightweight SQLite database editor built directly into VS Code. Browse t
 - **Schema management** — Create, rename, and drop tables; add and remove columns
 - **Indexes and health checks** — Create and inspect indexes, inspect triggers, and run bounded integrity and foreign-key checks
 - **SQL workspace** — Run SELECTs, PRAGMAs, and multi-statement SQL scripts with result grids, query history, rollback-safe writes, and normal VS Code save tracking
+- **SQLite SQL language support** — Syntax highlighting, comments/bracket behavior, and SQLite-focused snippets for standalone scripts
 - **Export** — Export visible rows as CSV, or dump schema and table data as SQL
 - **Local SQLite runtime** — Powered by [`sql.js`](https://github.com/sql-js/sql.js) (SQLite compiled to WebAssembly) with no native SQLite installation or database server required
 
@@ -71,6 +72,12 @@ The workspace supports:
 - Query history for recently executed scripts, available from the SQL workspace toolbar.
 
 If a script with explicit transaction control commits a change before a later statement fails, the workspace still marks the database as possibly changed and refreshes the UI so unsaved changes are not hidden.
+
+### SQLite SQL files
+
+The extension contributes a dedicated **SQLite SQL** language mode for standalone scripts. It adds SQLite-specific highlighting for PRAGMAs, dialect keywords, built-in functions, bind parameters, BLOB literals, and SQLite CLI dot commands while retaining VS Code's base SQL grammar. It also provides snippets for tables, inserts, upserts, common table expressions, transactions, indexes, and query plans.
+
+Files ending in `.sqlite.sql` or `.sqlite3.sql` use the mode automatically. A generic `.sql` file can opt in by selecting **SQLite SQL** from VS Code's language picker or by starting with `-- sqlite` (or `-- language=sqlite`). The extension deliberately does not claim every `.sql` file, so it does not replace VS Code's built-in SQL mode or conflict with another SQL language extension by default.
 
 ### GitHub Copilot integration
 

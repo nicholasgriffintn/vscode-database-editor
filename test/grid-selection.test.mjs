@@ -38,3 +38,32 @@ test('grid selection owns row ranges and publishes host context', () => {
   assert.equal(selection.selectedRows.length, 0);
   assert.equal(deleteButton.disabled, true);
 });
+
+test('active row selection is a delete candidate when no batch rows are checked', () => {
+  const state = {
+    table: { type: 'table', name: 'people' },
+    visibleRows: [
+      { identity: { kind: 'rowid', value: 1 }, values: { id: 1 } },
+      { identity: { kind: 'rowid', value: 2 }, values: { id: 2 } },
+    ],
+    visibleRowOffset: 0,
+    filter: '',
+    columnFilters: {},
+    sortColumn: null,
+    sortDirection: 'asc',
+  };
+  const deleteButton = { disabled: true, textContent: '' };
+  const selection = createGridSelection({
+    elements: { grid: { querySelector: () => null }, deleteSelectedRows: deleteButton },
+    vscode: { postMessage() {} },
+    getState: () => state,
+  });
+
+  selection.selectRow(1);
+  selection.updateUi();
+
+  assert.equal(selection.selectedRows.length, 0);
+  assert.deepEqual(selection.deletableRows.map((row) => row.values.id), [2]);
+  assert.equal(deleteButton.disabled, false);
+  assert.equal(deleteButton.textContent, 'Delete selected (1)');
+});

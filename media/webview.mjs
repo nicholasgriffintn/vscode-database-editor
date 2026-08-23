@@ -153,7 +153,7 @@ const editorControls = createEditorControls({
     loadedRows: visibleRows.length,
     autoPagination: editorSettings.autoPagination,
     maxRows: editorSettings.maxRows,
-    selectedRowCount: gridSelection.selectedRows.length,
+    selectedRowCount: gridSelection.deletableRows.length,
     sqlExportUi: exportWorkflow.getUiState(),
   }),
 });
@@ -216,7 +216,7 @@ const rowWorkflows = createRowWorkflows({
   refreshTables,
   markChanged: documentController.markChanged,
   clearSelectedRows: gridSelection.clearSelectedRows,
-  getSelectedRows: () => gridSelection.selectedRows,
+  getSelectedRows: () => gridSelection.deletableRows,
   confirm: confirmDestructiveAction,
   reportError: documentController.reportError,
   setStatus: (message) => { elements.status.textContent = message; },

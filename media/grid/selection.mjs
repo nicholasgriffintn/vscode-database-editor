@@ -35,10 +35,7 @@ export function createGridSelection({ elements, vscode, getState }) {
   }
 
   function updateUi() {
-    const count = getSelectedVisibleRows({
-      visibleRows: getState().visibleRows,
-      selectedRowKeys,
-    }).length;
+    const count = getDeletableRows().length;
     if (!elements.deleteSelectedRows) return;
     elements.deleteSelectedRows.disabled = getState().table?.type !== 'table' || count === 0;
     elements.deleteSelectedRows.textContent = count > 0
@@ -147,6 +144,23 @@ export function createGridSelection({ elements, vscode, getState }) {
     updateUi();
   }
 
+  function getBatchSelectedRows() {
+    return getSelectedVisibleRows({ visibleRows: getState().visibleRows, selectedRowKeys });
+  }
+
+  function getDeletableRows() {
+    const selectedRows = getBatchSelectedRows();
+    if (selectedRows.length > 0) {
+      return selectedRows;
+    }
+    const state = getState();
+    if (state.table?.type !== 'table' || !Number.isInteger(selectedRow)) {
+      return [];
+    }
+    const row = state.visibleRows[selectedRow];
+    return row ? [row] : [];
+  }
+
   return {
     clearSelectedRows,
     postContext,
@@ -160,6 +174,7 @@ export function createGridSelection({ elements, vscode, getState }) {
     get selectedCell() { return selectedCell; },
     get selectedRow() { return selectedRow; },
     get selectedRowKeys() { return selectedRowKeys; },
-    get selectedRows() { return getSelectedVisibleRows({ visibleRows: getState().visibleRows, selectedRowKeys }); },
+    get selectedRows() { return getBatchSelectedRows(); },
+    get deletableRows() { return getDeletableRows(); },
   };
 }

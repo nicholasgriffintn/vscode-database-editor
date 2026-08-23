@@ -3,10 +3,15 @@ import test from 'node:test';
 
 import { validateVsixContents } from '../scripts/verify-vsix.mjs';
 
+const languageSupportPaths = [
+  'language-support/sqlite-language-configuration.json',
+  'language-support/sqlite.tmLanguage.json',
+  'language-support/sqlite.code-snippets',
+];
 const required = [
   'package.json', 'readme.md', 'changelog.md', 'LICENSE.txt', 'dist/extension.js',
   'media/vendor/sqljs/sql-wasm.js', 'media/vendor/sqljs/sql-wasm.wasm', 'media/vendor/sqljs/LICENSE.sql.js',
-  'media/webview.mjs', 'media/styles.css',
+  'media/webview.mjs', 'media/styles.css', ...languageSupportPaths,
 ].map((file) => `extension/${file}`);
 
 test('VSIX validation accepts the exact release assets and metadata', () => {
@@ -15,6 +20,7 @@ test('VSIX validation accepts the exact release assets and metadata', () => {
     manifest: { description: 'SQLite editor', version: '1.0.0', main: './dist/extension.js' },
     expectedManifest: { version: '1.0.0', main: './dist/extension.js' },
     expectedMediaPaths: ['media/webview.mjs', 'media/styles.css'],
+    expectedLanguageSupportPaths: languageSupportPaths,
     sizeBytes: 5 * 1024 * 1024,
   }), []);
 });
@@ -25,6 +31,7 @@ test('VSIX validation rejects missing assets, mismatched metadata, oversized arc
     manifest: { description: '', version: '0.0.1', main: './wrong.js' },
     expectedManifest: { version: '1.0.0', main: './dist/extension.js' },
     expectedMediaPaths: ['media/webview.mjs'],
+    expectedLanguageSupportPaths: languageSupportPaths,
     sizeBytes: 11 * 1024 * 1024,
   });
   assert.ok(failures.some((failure) => /description/.test(failure)));
@@ -32,4 +39,5 @@ test('VSIX validation rejects missing assets, mismatched metadata, oversized arc
   assert.ok(failures.some((failure) => /10 MB/.test(failure)));
   assert.ok(failures.some((failure) => /Development file/.test(failure)));
   assert.ok(failures.some((failure) => /webview\.mjs/.test(failure)));
+  assert.ok(failures.some((failure) => /sqlite\.tmLanguage\.json/.test(failure)));
 });

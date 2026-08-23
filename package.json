@@ -19,7 +19,8 @@
     "vscode": "^1.125.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Programming Languages"
   ],
   "keywords": [
     "sqlite",
@@ -66,6 +67,34 @@
   },
   "markdown": "github",
   "contributes": {
+    "languages": [
+      {
+        "id": "sqlite-sql",
+        "aliases": [
+          "SQLite SQL",
+          "sqlite-sql"
+        ],
+        "extensions": [
+          ".sqlite.sql",
+          ".sqlite3.sql"
+        ],
+        "firstLine": "^\\s*--\\s*(?:language\\s*=\\s*)?sqlite\\b",
+        "configuration": "./language-support/sqlite-language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sqlite-sql",
+        "scopeName": "source.sqlite.sql",
+        "path": "./language-support/sqlite.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "sqlite-sql",
+        "path": "./language-support/sqlite.code-snippets"
+      }
+    ],
     "configuration": {
       "title": "SQLite Database Editor",
       "properties": {
