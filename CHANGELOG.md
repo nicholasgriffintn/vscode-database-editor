@@ -1,5 +1,15 @@
 # vscode-database-editor
 
+## 0.2.0
+
+### Minor Changes
+
+- 73b306c: Add a dedicated SQLite SQL language mode with dialect-aware syntax highlighting, editing configuration, and common SQLite snippets for standalone scripts.
+
+### Patch Changes
+
+- 2438f88: Enable FTS5 in the bundled SQLite runtime so databases containing full-text search tables open and query correctly.
+
 ## 0.1.1
 
 ### Patch Changes
