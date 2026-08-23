@@ -1,0 +1,9 @@
+{
+  "sqlJsVersion": "1.14.1",
+  "sqlJsCommit": "8088a6829d929338b861c7179275b1bc222725d9",
+  "emscriptenVersion": "5.0.0",
+  "sqliteVersion": "3.49.1",
+  "sqliteCompileOptions": [
+    "SQLITE_ENABLE_FTS5"
+  ]
+}

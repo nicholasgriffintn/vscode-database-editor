@@ -630,6 +630,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "fixture:sqlite": "node scripts/create-fixture.mjs",
+    "build:sqljs": "node scripts/build-sqljs-fts5.mjs",
     "vendor:sqljs": "node scripts/vendor-sqljs.mjs",
     "vendor:sqljs:check": "node scripts/vendor-sqljs.mjs --check",
     "test": "pnpm run test:unit",

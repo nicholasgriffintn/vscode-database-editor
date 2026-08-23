@@ -18,19 +18,24 @@ This checks the vendored SQLite runtime, unit and Extension Development Host int
 
 ## Vendored runtime files
 
-The SQLite runtime used by the webview lives in `media/vendor/sqljs`. These files are copied from the installed `sql.js` package:
+The SQLite runtime used by the webview lives in `media/vendor/sqljs`. It is built from the pinned `sql.js` source with FTS5 enabled so the editor can open and query databases containing FTS5 virtual tables:
 
 - `sql-wasm.js`
 - `sql-wasm.wasm`
 - `LICENSE.sql.js`
+- `runtime.json`
 
-They are built upstream by `sql.js`, which compiles SQLite to WebAssembly with Emscripten. This repository does not build SQLite or the WASM file directly.
+`sql-wasm.js` and `sql-wasm.wasm` are generated files. `runtime.json` records the pinned source and compiler versions. `LICENSE.sql.js` is copied from the installed package.
 
-Refresh the vendored files after changing the `sql.js` dependency:
+To rebuild the runtime, install the Emscripten version recorded in `runtime.json`, clone the matching `sql.js` tag, and pass that checkout to the build script:
 
 ```sh
+git clone --branch v1.14.1 https://github.com/sql-js/sql.js.git /tmp/sql.js
+pnpm run build:sqljs -- /tmp/sql.js
 pnpm run vendor:sqljs
 ```
+
+The build script verifies the exact `sql.js` commit, Emscripten version, and downloaded SQLite sources before compiling. It replaces generated build directories in the supplied `sql.js` checkout. When updating `sql.js`, pin its new source details in `scripts/build-sqljs-fts5.mjs` and update these instructions in the same change.
 
 Check the committed files match the installed package:
 
